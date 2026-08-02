@@ -82,7 +82,10 @@ export class Terrain {
 
         this._fieldOrigin.set(this.field.originX, this.field.originZ);
 
-        this._applyElement(this._element);
+        // onChange fires immediately with the current element, so this is the only
+        // call needed. The guard in _applyElement keeps that first call from queueing
+        // a rebake on top of the one prepare() is about to do — two 67 MB readbacks
+        // at startup for one field.
         this._disposers.push(biome.onChange((def) => this._applyElement(def)));
         this._disposers.push(settings.on("debug.wireframe", (on) => (this.material.wireframe = on)));
         this.material.wireframe = settings.get("debug.wireframe");
@@ -103,6 +106,7 @@ export class Terrain {
             console.error("[substrate] heightfield bake failed:", err);
         }
         this.compiled = await compileOrWarn("terrain", () => this.material.forceCompilationAsync(this.mesh));
+        this._prepared = true;
         report?.(1);
     }
 
@@ -162,8 +166,10 @@ export class Terrain {
         // Steep faces expose the compacted material underneath, darkened further.
         const c = def.surface.albedoCompacted;
         this._albedoSteep.set(c[0] * 0.72, c[1] * 0.72, c[2] * 0.72);
-        this._queueRebake();
+        if (this._prepared) this._queueRebake();
     }
+
+    private _prepared = false;
 
     /**
      * Rebakes are debounced and run off the frame loop. The GPU pass is a few
