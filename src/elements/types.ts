@@ -1,0 +1,108 @@
+/**
+ * Element parameter blocks.
+ *
+ * The architectural test for this whole project (see the build spec) is that adding
+ * an element means adding a row of numbers here and NOTHING else. Every field on
+ * these interfaces must be consumed by shared code. If a field is only ever read by
+ * an `if (biome === 'x')` branch, the abstraction has already failed and the branch
+ * is the bug, not the field.
+ */
+
+export type BiomeId = "snow" | "desert" | "volcanic";
+
+/**
+ * Consumed by the single substrate relaxation pass (Phase 3). These seven fields are
+ * the entire difference between snow, sand and ash at the simulation level.
+ */
+export interface SubstrateParams {
+    /** Resistance to slump. Snow high, sand ~0. 0..1 */
+    cohesion: number;
+    /** Hard slope limit in degrees. Sand enforces ~34 strictly. */
+    angleOfRepose: number;
+    /** Berm-vs-floor slump rate ratio. Snow ~3:1. */
+    slumpAnisotropy: number;
+    /** Isotropic spreading per second. */
+    diffusionRate: number;
+    /** Seconds for depression depth to halve. Ash is effectively permanent. */
+    decayHalfLife: number;
+    /** Coupling strength to the Phase 5 velocity field. 0..1 */
+    windSusceptibility: number;
+    /** How much phase-state change alters cohesion (Phase 6). Drives lava crust hardening. */
+    thermalCoupling: number;
+    /** Depth in metres above which loose material lifts into the air field (Phase 5). */
+    liftThreshold: number;
+}
+
+/**
+ * Consumed by the analytic sky + IBL bake (Phase 2). The ground bounce term is what
+ * differentiates the biomes at the lighting level, so it is a first-class parameter.
+ */
+export interface AtmosphereParams {
+    /** Ground albedo fed into the iterative bounce solve. Linear RGB. */
+    groundAlbedo: [number, number, number];
+    /** Bounce gain multiplier. Snow very high, volcanic near zero. */
+    groundBounce: number;
+    /** Aerosol loading. Desert high, volcanic ash-loaded. */
+    turbidity: number;
+    /** Distance haze density (1/m). */
+    hazeDensity: number;
+    /** Mie asymmetry. Higher = stronger forward scattering. */
+    mieG: number;
+    /** Ambient that comes from emission rather than bounce (volcanic). Linear RGB. */
+    emissiveAmbient: [number, number, number];
+    /** Rayleigh tint multiplier, lets each biome push its zenith gradient. */
+    rayleighScale: number;
+}
+
+/**
+ * Consumed by the one surface uber-shader (Phase 4).
+ */
+export interface SurfaceParams {
+    /** Linear RGB base albedo of undisturbed material. */
+    albedo: [number, number, number];
+    /** Albedo of fully compacted material (packed snow, wet sand, crushed ash). */
+    albedoCompacted: [number, number, number];
+    baseRoughness: number;
+    /** Subsurface back-scatter tint. Snow's depth-dependent blue is the headline case. */
+    subsurfaceTint: [number, number, number];
+    subsurfaceStrength: number;
+    /** Glints per square metre, and the noise basis they sit on (kept distinct per element). */
+    glintDensity: number;
+    glintBasis: number;
+    /** Specular lobe blend for dual-lobe sand. 0 = single lobe. */
+    dualLobeMix: number;
+    /** Blackbody emissive gain driven by the heat channel. Zero for non-volcanic. */
+    emissiveGain: number;
+}
+
+/**
+ * Governs the swept wake cross-section (Phase 8). Element decides how far the lip
+ * can curl before the repose angle collapses it.
+ */
+export interface WakeParams {
+    /** Curl sweep in degrees at full carve. Snow reaches a hanging lip, sand does not. */
+    maxCurlDeg: number;
+    /** Peak wall height in metres at full-speed carve. */
+    peakWall: number;
+    /** Seconds from laid to collapsed. Wake length is life x speed, no second constant. */
+    collapseLife: number;
+    /** Fraction of displaced material that becomes airborne instead of banking. */
+    airborneFraction: number;
+}
+
+export interface ElementDef {
+    id: BiomeId;
+    label: string;
+    /** Short description shown in the overlay's biome selector. */
+    blurb: string;
+    substrate: SubstrateParams;
+    atmosphere: AtmosphereParams;
+    surface: SurfaceParams;
+    wake: WakeParams;
+    /** Default sun elevation in degrees when this biome is selected. */
+    sunElevation: number;
+    /** Default wind strength 0..1 when this biome is selected. */
+    windStrength: number;
+    /** Linear RGB of direct sunlight at the reference elevation. */
+    sunTint: [number, number, number];
+}

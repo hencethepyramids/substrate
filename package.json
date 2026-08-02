@@ -1,0 +1,23 @@
+{
+  "name": "substrate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Four elements, one simulation core. WebGPU procedural tech demo.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@babylonjs/core": "^9.19.0",
+    "@babylonjs/materials": "^9.19.0"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.71",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.0"
+  }
+}

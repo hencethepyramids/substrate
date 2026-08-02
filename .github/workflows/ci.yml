@@ -1,0 +1,41 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+    workflow_dispatch:
+
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build:
+        name: typecheck and build
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: npm
+
+            - name: Install
+              run: npm ci
+
+            # Split from the build so a type error and a bundling error are distinct
+            # red steps rather than one ambiguous failure.
+            - name: Typecheck
+              run: npm run typecheck
+
+            - name: Build
+              run: npx vite build
+
+            - name: Upload build output
+              uses: actions/upload-artifact@v4
+              with:
+                  name: dist-${{ github.sha }}
+                  path: dist
+                  retention-days: 7
