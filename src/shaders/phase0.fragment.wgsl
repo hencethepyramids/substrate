@@ -1,20 +1,22 @@
-// Phase 0 placeholder surface — deleted when the Phase 1 clipmap lands.
+// Phase 0 placeholder surface — deleted when the Phase 7 character lands.
 //
-// Everything here is procedural and biome-parameterised, so the biome selector has a
-// visible effect from day one. It is deliberately NOT a preview of the Phase 4 material:
-// no subsurface, no glints, no substrate channels. Just enough to see where you are.
+// Deliberately NOT a preview of the Phase 4 material: no subsurface, no glints, no
+// substrate channels. But it is lit by exactly the same sky the terrain is, through
+// the same include, because a capsule shaded by a different ambient than the ground
+// it stands on is how you end up trusting the wrong one.
+
+#include<substrateSkyMap>
+#include<substrateSkyLut>
+#include<substrateSh>
+#include<substrateSkyData>
 
 varying vWorld: vec3f;
 varying vNormal: vec3f;
 
 uniform baseColor: vec3f;
 uniform lineColor: vec3f;
-uniform sunDir: vec3f;
-uniform sunColor: vec3f;
-uniform ambient: vec3f;
-uniform fogColor: vec3f;
 uniform cameraPos: vec3f;
-// x: solid (0 = grid, 1 = flat), y: fog density, z: exposure, w: unused
+// x: solid (0 = grid, 1 = flat), y: exposure, z: unused, w: unused
 uniform params: vec4f;
 
 /// Screen-space-antialiased grid, one line every `spacing` metres.
@@ -32,7 +34,7 @@ fn gridLine(p: vec2f, spacing: f32, width: f32) -> f32 {
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
     let n = normalize(input.vNormal);
-    let l = normalize(uniforms.sunDir);
+    let l = normalize(uniforms.sbSunDir);
 
     // Wrapped diffuse. The real one arrives in Phase 4 with the subsurface term.
     let wrap = 0.35;
@@ -45,14 +47,15 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         albedo = mix(albedo, uniforms.lineColor, clamp(fine + coarse, 0.0, 1.0));
     }
 
-    var color = albedo * (uniforms.sunColor * ndl + uniforms.ambient);
+    var color = albedo * (sbSunDiffuse() * ndl + sbShIrradiance(n));
 
-    // Distance haze — the same exponential Phase 2 will drive from the atmosphere block.
-    let dist = length(input.vWorld - uniforms.cameraPos);
-    let fog = 1.0 - exp(-dist * uniforms.params.y);
-    color = mix(color, uniforms.fogColor, clamp(fog, 0.0, 1.0));
+    let toEye = input.vWorld - uniforms.cameraPos;
+    let dist = length(toEye);
+    let viewDir = toEye / max(dist, 1e-4);
+    let transmittance = sbAerial(dist * 0.001);
+    color = color * transmittance + sbHazeColor(viewDir) * (vec3f(1.0) - transmittance);
 
-    color = color * exp2(uniforms.params.z);
+    color = color * exp2(uniforms.params.y);
 
     // Placeholder transfer only. Phase 9 replaces this with AgX in the post chain.
     fragmentOutputs.color = vec4f(pow(max(color, vec3f(0.0)), vec3f(1.0 / 2.2)), 1.0);

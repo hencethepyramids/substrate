@@ -7,7 +7,7 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Settings } from "../core/settings";
-import type { Environment } from "../render/environment";
+import { Sky, SKY_UNIFORMS, SKY_SAMPLERS, WORLD_GROUP } from "../render/sky";
 import vertexSource from "../shaders/phase0.vertex.wgsl?raw";
 import fragmentSource from "../shaders/phase0.fragment.wgsl?raw";
 
@@ -27,11 +27,13 @@ export class PlaceholderCharacter {
     readonly material: ShaderMaterial;
 
     private readonly _settings: Settings;
+    private readonly _sky: Sky;
     private readonly _params = new Vector4(1, 0, 0, 0);
     private readonly _albedo = new Color3(0.62, 0.24, 0.14);
 
-    constructor(scene: Scene, settings: Settings) {
+    constructor(scene: Scene, settings: Settings, sky: Sky) {
         this._settings = settings;
+        this._sky = sky;
 
         this.material = new ShaderMaterial(
             "placeholderCharacter",
@@ -39,14 +41,17 @@ export class PlaceholderCharacter {
             { vertexSource, fragmentSource },
             {
                 attributes: ["position", "normal"],
-                uniforms: ["world", "viewProjection", "baseColor", "lineColor", "sunDir", "sunColor", "ambient", "fogColor", "cameraPos", "params"],
+                uniforms: ["world", "viewProjection", "baseColor", "lineColor", "cameraPos", "params", ...SKY_UNIFORMS],
+                samplers: [...SKY_SAMPLERS],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
         );
+        sky.bindTo(this.material);
 
         this.mesh = CreateCapsule("placeholderCharacter", { height: HEIGHT, radius: RADIUS, tessellation: 20, subdivisions: 1 }, scene);
         this.mesh.material = this.material;
         this.mesh.isPickable = false;
+        this.mesh.renderingGroupId = WORLD_GROUP;
     }
 
     /** Feet position in, capsule centre out. */
@@ -55,22 +60,19 @@ export class PlaceholderCharacter {
         this.mesh.rotation.y = facingYaw;
     }
 
-    update(camera: Camera, env: Environment): void {
+    update(camera: Camera): void {
         const s = this._settings.v;
         this.mesh.setEnabled(s["sys.character"]);
         if (!s["sys.character"]) return;
 
-        this._params.set(1, env.fogDensity, s["render.exposure"], 0);
+        this._params.set(1, s["render.exposure"], 0, 0);
 
         const m = this.material;
         m.setColor3("baseColor", this._albedo);
         m.setColor3("lineColor", this._albedo);
-        m.setVector3("sunDir", env.sunDir);
-        m.setColor3("sunColor", env.sunColor);
-        m.setColor3("ambient", env.ambient);
-        m.setColor3("fogColor", env.skyLinear);
         m.setVector3("cameraPos", camera.globalPosition);
         m.setVector4("params", this._params);
+        this._sky.pushTo(m);
     }
 
     isReady(): boolean {

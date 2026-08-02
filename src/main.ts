@@ -12,7 +12,7 @@ import { GpuTimings } from "./core/gpuTimer";
 import { Input } from "./core/input";
 import { CameraRig } from "./core/cameraRig";
 import { Mover } from "./core/mover";
-import { Environment } from "./render/environment";
+import { Sky } from "./render/sky";
 import { Terrain } from "./terrain/terrain";
 import { PlaceholderCharacter } from "./character/placeholder";
 import { registerShaderIncludes } from "./shaders/lib/register";
@@ -43,7 +43,6 @@ async function boot(): Promise<void> {
     const settings = new Settings();
     const biome = new BiomeState(settings);
     const perf = new Perf(512);
-    const env = new Environment();
     const loader = new LoadingScreen(stage);
 
     let engine!: WebGPUEngine;
@@ -51,6 +50,7 @@ async function boot(): Promise<void> {
     let gpu!: GpuTimings;
     let input!: Input;
     let rig!: CameraRig;
+    let sky!: Sky;
     let terrain!: Terrain;
     let character!: PlaceholderCharacter;
     let overlay!: Overlay;
@@ -74,9 +74,18 @@ async function boot(): Promise<void> {
     });
 
     loader.add("clipmap mesh", 2, () => {
-        terrain = new Terrain(scene, settings, biome);
-        character = new PlaceholderCharacter(scene, settings);
+        // Sky first: terrain and the character bind its LUTs at construction.
+        sky = new Sky(scene, settings, biome);
+        terrain = new Terrain(scene, settings, biome, sky);
+        character = new PlaceholderCharacter(scene, settings, sky);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
+    });
+
+    // Two small render targets and a fullscreen triangle. Cheap next to the height
+    // bake, but it has to happen behind the screen: the first visible frame must not
+    // be lit by an unbaked sky.
+    loader.add("baking sky", 2, async (report) => {
+        await sky.prepare(report);
     });
 
     // The heightfield bake plus the 67 MB readback that mirrors it to the CPU. This is
@@ -98,11 +107,11 @@ async function boot(): Promise<void> {
         // object is only built on first draw. Draw real frames until everything
         // reports ready so the first visible frame cannot stall.
         for (let attempt = 0; attempt < 180; attempt++) {
-            env.update(settings, biome.current, scene);
-            terrain.update(rig.camera, env);
-            character.update(rig.camera, env);
+            sky.update(rig.camera);
+            terrain.update(rig.camera);
+            character.update(rig.camera);
             scene.render();
-            if (terrain.ready && character.isReady() && scene.isReady()) break;
+            if (terrain.ready && sky.ready && character.isReady() && scene.isReady()) break;
             await nextFrame();
         }
 
@@ -110,6 +119,7 @@ async function boot(): Promise<void> {
         // rectangle with a clean console is not.
         console.info(
             `[substrate] boot: terrain material ${terrain.compiled ? "ok" : "FAILED"}, ` +
+                `sky ${sky.compiled ? "ok" : "FAILED"}, ` +
                 `character material ${characterOk ? "ok" : "FAILED"}, ` +
                 `height mirror ${terrain.field.mirrorValid ? "ok" : "FAILED"}, ` +
                 `ground at origin ${terrain.field.sampleHeight(0, 0).toFixed(2)} m`,
@@ -119,6 +129,7 @@ async function boot(): Promise<void> {
 
     loader.add("overlay", 1, () => {
         overlay = new Overlay({ root: stage, settings, perf, gpu, scene, input, biome, capability });
+        overlay.addCounter("sky bakes", () => String(sky.bakes));
         registerActions(overlay, settings, mover, rig, terrain);
     });
 
@@ -138,6 +149,7 @@ async function boot(): Promise<void> {
     const S_SIM = perf.section("locomotion");
     const S_GROUND = perf.section("grounding");
     const S_CAMERA = perf.section("camera");
+    const S_SKY = perf.section("sky");
     const S_UNIFORMS = perf.section("uniforms");
     const S_RENDER = perf.section("render submit");
     const S_OVERLAY = perf.section("overlay");
@@ -179,10 +191,17 @@ async function boot(): Promise<void> {
         rig.update(input, mover.position, perf.dt);
         perf.end(S_CAMERA);
 
+        // Before the scene render, not inside it: a rebake binds its own target, and
+        // the SH pass integrates the LUT written immediately before it. This section
+        // is CPU submit time — the bake itself is GPU work and only happens on the
+        // frames where the sun or a sky control actually moved.
+        perf.begin(S_SKY);
+        sky.update(rig.camera);
+        perf.end(S_SKY);
+
         perf.begin(S_UNIFORMS);
-        env.update(settings, biome.current, scene);
-        terrain.update(rig.camera, env);
-        character.update(rig.camera, env);
+        terrain.update(rig.camera);
+        character.update(rig.camera);
         perf.end(S_UNIFORMS);
 
         perf.begin(S_RENDER);
@@ -206,6 +225,7 @@ async function boot(): Promise<void> {
         overlay.dispose();
         terrain.dispose();
         character.dispose();
+        sky.dispose();
         input.dispose();
         unbindEngine();
         scene.dispose();

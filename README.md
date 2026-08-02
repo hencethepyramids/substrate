@@ -8,9 +8,10 @@ Four elements, one simulation core. WebGPU, zero assets, hand-written WGSL.
 **Live: https://hencethepyramids.github.io/substrate/**
 
 ```
-npm run dev        # http://localhost:5173
-npm run typecheck  # tsc --noEmit
-npm run build      # typecheck + vite build
+npm run dev            # http://localhost:5173
+npm run typecheck      # tsc --noEmit
+npm run check:shaders  # static checks over the WGSL
+npm run build          # typecheck + shader check + vite build
 ```
 
 Requires WebGPU (Chrome/Edge 113+, Firefox 141+). There is no WebGL fallback — the
@@ -20,21 +21,32 @@ capability gate prints a message and stops.
 
 | Workflow | Trigger | Does |
 | --- | --- | --- |
-| [CI](.github/workflows/ci.yml) | push to `main`, any PR | typecheck, build, upload `dist` as a 7-day artifact |
+| [CI](.github/workflows/ci.yml) | push to `main`, any PR | typecheck, shader check, build, upload `dist` as a 7-day artifact |
 | [Deploy](.github/workflows/deploy.yml) | push to `main` | builds with `VITE_BASE=/substrate/` and publishes to GitHub Pages |
 
 Typecheck and build are separate steps on purpose — a type error and a bundling
 error should be two distinct red steps, not one ambiguous failure.
 
+**Neither of them looks inside a `.wgsl` file.** Shaders are opaque strings until a
+driver sees them, and this project has shipped a green build that rendered nothing
+more than once. [scripts/checkShaders.mjs](scripts/checkShaders.mjs) is the step that
+does look: it resolves the `#include` graph and fails on an unregistered include, a
+`uniforms.x` with no declaration behind it, a uniform or texture the WGSL declares
+that no TypeScript ever sets (and the reverse), a texture missing its paired sampler,
+an identifier used above its declaration, and a bare `return;` inside an entry point —
+which Babylon's processor turns into invalid WGSL by appending its own `return`. It
+does not compile WGSL and cannot tell you the picture is right. It closes the gap
+between "builds" and "the driver will accept this".
+
 ---
 
-## Status: Phase 1 (terrain) complete
+## Status: Phase 2 pass A (sky and lighting) complete
 
 | Phase | State |
 | --- | --- |
 | 0 — harness | done |
 | 1 — terrain | done |
-| 2 — sky, lighting, atmosphere | not started |
+| 2 — sky, lighting, atmosphere | pass A done, pass B (shadows, far range) next |
 | 3 — substrate buffer | not started |
 | 4 — surface materials | not started |
 | 5 — air | not started |
@@ -89,6 +101,58 @@ error should be two distinct red steps, not one ambiguous failure.
 - **Baked once** into a 4096² RG32F field over 2048 m (0.5 m/texel), and **mirrored
   to the CPU** so grounding stands on the surface that is drawn.
 
+### Phase 2 acceptance, pass A
+
+> Sun elevation drives everything. No ambient constant anywhere.
+
+Phase 2 is deliberately two passes. This is the first: the atmosphere and the light
+that comes out of it, verified on hardware before the shadow cascades go anywhere
+near it. Pass B is the three PCSS cascades and the far-range raymarch.
+
+**Verified on an RTX Lovelace card.** 3 draw calls, 324,424 triangles, main pass
+0.22–0.30 ms against a 3.5 ms budget. Sky bakes hold at 3 after boot and never move
+again while the sun is still.
+
+- **One atmosphere model.** [atmosphere.wgsl](src/shaders/lib/atmosphere.wgsl) is
+  Nishita single scattering with ozone and a multiple-scattering approximation, in
+  kilometres. Nothing else in the project is allowed an extinction curve of its own —
+  the sky-view LUT, the SH bake and Phase 2's far-range raymarch all include this file.
+- **Two baked textures, no readback.** A 256×128 RGBA16F sky-view LUT, and a 16×1
+  RGBA32F block holding nine SH irradiance coefficients, the direct sun, the ground
+  bounce and the aerial extinction. Materials sample the block directly, so the light
+  on a surface cannot drift from the sky drawn behind it. Both rebake only when the
+  sun or a sky control moves; the overlay counts the bakes, because a rebake is
+  invisible in both the frame graph and the main-pass GPU timing.
+- **No ambient constant.** There is no `fAmbient` uniform any more, and no fog colour.
+  A surface gets `albedo * (sun * N·L + shIrradiance(n))` and nothing else — both terms
+  already carry the Lambert 1/π, so there is no loose constant left to tune.
+- **The ground bounce is solved, not dialled.** A ground point sees sky over
+  `sky.skyVisibility` of its hemisphere and lit ground over the rest, so its own bounce
+  feeds its own illumination; the bake iterates that to convergence. This is what makes
+  snow read white rather than grey, and the size of it is measurable: on a 45° face
+  pointed directly away from the sun, the bounce is **+66% luminance at a 12° sun and
+  +109% at 30°**, and it drops the face's saturation from 0.67 to 0.51. Turn
+  `sky.groundBounce` to 0 to watch it go.
+- **Elements still differ only by numbers.** `groundAlbedo`, `groundBounce`,
+  `turbidity`, `mieG`, `rayleighScale`, `hazeDensity` and `emissiveAmbient` were
+  declared in Phase 0 as the atmosphere block and are now all consumed by shared code.
+  Volcanic's emission enters through the *lower* hemisphere, so ash glows up at a face
+  from below rather than through an ambient term that lights it from everywhere.
+- **The LUT's orientation is measured, not asserted.** Babylon's shader processor
+  appends `position.y *= yFactor_` to every vertex main, and `yFactor_` is −1 for any
+  render target — which a procedural texture always is. Get that backwards and every
+  upward ray samples a downward one, the sky contributes nothing, and the scene falls
+  back on ground bounce alone. It is also invisible in a heightfield, because
+  mirrored noise is still noise, which is how it survived Phase 1. So the data bake
+  writes both what the LUT says and what a direct evaluation says for two probe
+  directions, and boot bakes it each way and keeps whichever agrees: **0.0003 against
+  1.00**. The same trick as the height mirror, for the same reason.
+- **Aerial perspective, not exponential fog.** Extinction is the real sea-level
+  coefficient; the in-scatter colour is the sky itself, sampled at the horizon of the
+  view azimuth — which is where the air between here and a hillside 800 m away actually
+  is. `sky.aerialScale` defaults above 1 only because the clipmap still stops at 870 m
+  and haze is doing the work the far-range raymarch will take over in pass B.
+
 ### Controls
 
 | | |
@@ -124,6 +188,15 @@ target changes.
 scratch buffer at overlay rate; the overlay reuses its row elements and only writes
 `textContent`; uniform pushes mutate preallocated vectors.
 
+**The sky splits into four includes for a mechanical reason.** An include that
+declares a texture obliges every shader including it to bind that texture. The LUT
+bake needs the direction mapping but must not declare the LUT it is writing; the SH
+bake needs the LUT but not the data texture it produces. So the maths
+([skyMap](src/shaders/lib/skyMap.wgsl), [sh](src/shaders/lib/sh.wgsl)) is split from
+the declarations ([skyLutTex](src/shaders/lib/skyLutTex.wgsl),
+[skyData](src/shaders/lib/skyData.wgsl)) and each pass includes only what it binds.
+Same reason `substratePack` was split out of `substrateTerrainField` in Phase 1.
+
 **Rule 4 has a home.** [terrainField.wgsl](src/shaders/lib/terrainField.wgsl) is the
 single definition of "where is the ground". The beauty pass includes it today and
 every Phase 2 shadow cascade will include the same file. It uses explicit bilinear
@@ -146,17 +219,18 @@ with one line: `gpu.register("substrate", () => substrateRT.gpuTimeInFrame)`.
 
 ### Deliberately deferred
 
-`debug.view`, the `sys.*` toggles and most of the `post.*` group are wired into
-settings but have nothing behind them yet — they exist so later phases plug in
+`sys.shadows` and `sys.farRange` are pass B. `debug.view`'s `cascades` and `shadowMap`
+entries go with them. The remaining `sys.*` toggles and most of the `post.*` group are
+wired into settings but have nothing behind them yet — they exist so later phases plug in
 without touching the overlay, and per rule 3 ("a toggle for every subsystem that
 will ever exist"). Each phase implements its own entries.
 
 ### Placeholders, marked for deletion
 
-- `src/core/phase0World.ts` + `src/shaders/phase0.*.wgsl` — a 2-triangle grid plane
-  and a capsule. Deleted by Phase 1 (clipmap) and Phase 7 (character). They exist to
-  prove the hand-written WGSL path compiles, binds uniforms and warms correctly, and
-  to make the biome switch visible from day one.
+- `src/shaders/phase0.*.wgsl` — the capsule's material. Deleted by Phase 7. It is lit
+  through the same sky include the terrain uses, because a capsule shaded by a
+  different ambient than the ground it stands on is how you end up trusting the wrong
+  one.
 - `src/core/mover.ts` — kinematic locomotion. Phase 7 replaces it with the solved
   gait machine, keeping the same contract: it owns a feet position and a facing.
 
@@ -170,9 +244,14 @@ src/
   core/              settings, biome switch, input, camera rig, perf, gpu timing,
                      capability gate, loading, engine
   elements/          per-element parameter blocks and the material registry
-  shaders/           all WGSL — lib/ will hold the shared includes
+  terrain/           heightfield bake + CPU mirror, clipmap mesh, terrain system
+  render/            sky, atmosphere and IBL; the shared debug-view codes
+  character/         the placeholder capsule, until Phase 7
+  shaders/           all WGSL — lib/ holds the shared includes
   ui/                settings and performance overlay
+scripts/
+  checkShaders.mjs   the static WGSL check CI runs
 ```
 
-`terrain/`, `render/`, `air/`, `fire/`, `character/`, `vfx/`, `post/` arrive with the
-phases that need them — the spec is explicit that phases are not scaffolded up front.
+`air/`, `fire/`, `vfx/`, `post/` arrive with the phases that need them — the spec is
+explicit that phases are not scaffolded up front.

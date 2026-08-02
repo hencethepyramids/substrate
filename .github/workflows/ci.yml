@@ -30,6 +30,11 @@ jobs:
             - name: Typecheck
               run: npm run typecheck
 
+            # tsc and vite never look inside a .wgsl file. This is the only step that
+            # does — see scripts/checkShaders.mjs for what it can and cannot catch.
+            - name: Check shaders
+              run: npm run check:shaders
+
             - name: Build
               run: npx vite build
 

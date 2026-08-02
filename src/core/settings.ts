@@ -52,6 +52,8 @@ export const DEBUG_VIEWS = [
     "terrain.rings",
     "terrain.morph",
     "terrain.slope",
+    "sky.irradiance",
+    "sky.aerial",
     "cascades",
     "shadowMap",
     "substrate.depression",
@@ -105,6 +107,24 @@ export const SCHEMA = {
     "terrain.heightScale": num({ group: "Terrain", label: "Height scale", def: 1, min: 0.05, max: 2.5, step: 0.01, hint: "Applied when the field is read, so it is live with no rebake." }),
     "terrain.morph": bool({ group: "Terrain", label: "CDLOD morphing", def: true, hint: "Turn off to see exactly where the LOD seams are." }),
     "terrain.followCamera": bool({ group: "Terrain", label: "Clipmap follows camera", def: true, hint: "Freeze to walk out of the clipmap and inspect the rings." }),
+
+    // -- Sky -----------------------------------------------------------------
+    // Every control here rebakes the sky-view LUT and the SH irradiance behind it.
+    // Two textures, ~0.3 ms, only when one of these moves.
+    "sky.multiScatter": num({
+        group: "Sky",
+        label: "Multiple scattering",
+        def: 0.5,
+        min: 0,
+        max: 0.9,
+        step: 0.01,
+        hint: "Per-order gain of the scattering series. 0 is single-scatter only, which reads as a flat navy card.",
+    }),
+    "sky.groundBounce": num({ group: "Sky", label: "Ground bounce", def: 1, min: 0, max: 3, step: 0.01, hint: "Multiplies the element's own bounce gain. Drop to 0 to see how much of snow's white is bounce." }),
+    "sky.aerialScale": num({ group: "Sky", label: "Aerial perspective", def: 1.5, min: 0, max: 6, step: 0.05, hint: "Scales distance extinction only, not the sky. Above 1 while the clipmap still stops at 870 m." }),
+    "sky.sunDisc": bool({ group: "Sky", label: "Sun disc", def: true }),
+    "sky.skyVisibility": num({ group: "Sky", label: "Sky visibility", def: 0.88, min: 0.2, max: 1, step: 0.01, advanced: true, hint: "Fraction of the sky an average ground point sees. Drives the bounce solve." }),
+    "sky.steps": num({ group: "Sky", label: "LUT raymarch steps", def: 24, min: 8, max: 64, step: 1, advanced: true, hint: "Per direction, in the sky-view bake. Costs nothing per frame — only per rebake." }),
 
     // -- Render --------------------------------------------------------------
     "render.resolutionScale": num({ group: "Render", label: "Resolution scale", def: 1, min: 0.5, max: 2, step: 0.05 }),
@@ -172,10 +192,11 @@ export type SettingListener<K extends SettingKey = SettingKey> = (value: Setting
 
 /**
  * Bumped whenever the schema changes materially. Phase 1 added the Terrain group and
- * new debug views; more importantly, a stale persisted `ui.overlayOpen: false` from an
- * earlier build would hide the overlay on first run with no obvious way to know why.
+ * new debug views; Phase 2 added the Sky group. More importantly, a stale persisted
+ * `ui.overlayOpen: false` from an earlier build would hide the overlay on first run
+ * with no obvious way to know why.
  */
-const STORAGE_KEY = "substrate.settings.v2";
+const STORAGE_KEY = "substrate.settings.v3";
 
 export class Settings {
     /** Direct value access for the hot path: `settings.v["sys.terrain"]`. */

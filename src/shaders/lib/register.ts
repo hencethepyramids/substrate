@@ -3,6 +3,11 @@ import noise from "./noise.wgsl?raw";
 import heightfield from "./heightfield.wgsl?raw";
 import pack from "./pack.wgsl?raw";
 import terrainField from "./terrainField.wgsl?raw";
+import atmosphere from "./atmosphere.wgsl?raw";
+import sh from "./sh.wgsl?raw";
+import skyMap from "./skyMap.wgsl?raw";
+import skyLutTex from "./skyLutTex.wgsl?raw";
+import skyData from "./skyData.wgsl?raw";
 
 /**
  * Registers the shared WGSL includes.
@@ -11,6 +16,12 @@ import terrainField from "./terrainField.wgsl?raw";
  * is textually included by whatever needs it, so the beauty pass and the shadow
  * cascades are compiled from the same source lines rather than from two files that
  * drift apart over a few phases.
+ *
+ * The sky splits into four rather than one for a mechanical reason: an include that
+ * declares a texture obliges every shader including it to bind that texture. The
+ * LUT bake needs the direction mapping but must not declare the LUT it is writing,
+ * and the SH bake needs the LUT but not the data texture it is producing. Splitting
+ * the declarations from the maths is what keeps each pass binding only what it uses.
  */
 let registered = false;
 
@@ -22,4 +33,9 @@ export function registerShaderIncludes(): void {
     store["substrateHeightfield"] = heightfield;
     store["substratePack"] = pack;
     store["substrateTerrainField"] = terrainField;
+    store["substrateAtmosphere"] = atmosphere;
+    store["substrateSh"] = sh;
+    store["substrateSkyMap"] = skyMap;
+    store["substrateSkyLut"] = skyLutTex;
+    store["substrateSkyData"] = skyData;
 }

@@ -1,7 +1,17 @@
-// Phase 1 terrain shading. Deliberately thin: Phase 2 replaces the lighting with the
-// analytic sky and cascaded shadows, and Phase 4 replaces the material with the
-// uber-shader that reads the substrate channels. What is real here is the normal,
-// which comes from the analytic derivative baked alongside the height.
+// Terrain shading. Phase 4 replaces the material with the uber-shader that reads the
+// substrate channels; what is real here is the normal, which comes from the analytic
+// derivative baked alongside the height, and the light, which now comes from the same
+// atmosphere the sky behind it is drawn from.
+//
+// There is no ambient constant in this file and no fog colour uniform. Both were
+// Phase 1 stand-ins for numbers that are now solved: sbShIrradiance is the sky and
+// the ground bounce projected into SH, and sbHazeColor is the sky itself, sampled at
+// the horizon of the view azimuth.
+
+#include<substrateSkyMap>
+#include<substrateSkyLut>
+#include<substrateSh>
+#include<substrateSkyData>
 
 varying vWorld: vec3f;
 varying vDeriv: vec2f;
@@ -9,20 +19,17 @@ varying vLevel: f32;
 varying vMorph: f32;
 
 uniform fCameraPos: vec3f;
-uniform fSunDir: vec3f;
-uniform fSunColor: vec3f;
-uniform fAmbient: vec3f;
-uniform fFogColor: vec3f;
 uniform fAlbedo: vec3f;
 uniform fAlbedoSteep: vec3f;
-uniform fParams: vec4f; // x: fog density, y: exposure, z: debug view, w: level count
+uniform fParams: vec4f; // x: exposure, y: debug view, z: level count, w: unused
 
-const SB_DEBUG_OFF: f32 = 0.0;
 const SB_DEBUG_NORMALS: f32 = 1.0;
 const SB_DEBUG_RINGS: f32 = 2.0;
 const SB_DEBUG_MORPH: f32 = 3.0;
 const SB_DEBUG_DEPTH: f32 = 4.0;
 const SB_DEBUG_SLOPE: f32 = 5.0;
+const SB_DEBUG_SKY_IRRADIANCE: f32 = 6.0;
+const SB_DEBUG_AERIAL: f32 = 7.0;
 
 fn sbHue(t: f32) -> vec3f {
     return 0.5 + 0.5 * cos(6.2831853 * (t + vec3f(0.0, 0.33, 0.67)));
@@ -38,8 +45,16 @@ fn sbHue(t: f32) -> vec3f {
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
     let n = normalize(vec3f(-input.vDeriv.x, 1.0, -input.vDeriv.y));
-    let dist = length(input.vWorld - uniforms.fCameraPos);
-    let debug = uniforms.fParams.z;
+
+    let toEye = input.vWorld - uniforms.fCameraPos;
+    let dist = length(toEye);
+    let viewDir = toEye / max(dist, 1e-4);
+
+    let debug = uniforms.fParams.y;
+    let exposure = uniforms.fParams.x;
+
+    // Distances are metres here and kilometres in the atmosphere model.
+    let transmittance = sbAerial(dist * 0.001);
 
     // Steep faces expose the hard material underneath. A stand-in for the Phase 4
     // triplanar blend, but driven by the same slope the real one will use.
@@ -53,7 +68,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     } else if (debug == SB_DEBUG_RINGS) {
         // Ring level as hue. If a band jumps in steps as you walk rather than sliding,
         // the per-level snap is wrong.
-        rgb = sbHue(input.vLevel / uniforms.fParams.w);
+        rgb = sbHue(input.vLevel / uniforms.fParams.z);
     } else if (debug == SB_DEBUG_MORPH) {
         // Should ramp 0 -> 1 smoothly inside each ring's outer band and be flat
         // elsewhere. Any hard edge here is a popping seam.
@@ -62,25 +77,36 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         rgb = vec3f(1.0 - exp(-dist * 0.0016));
     } else if (debug == SB_DEBUG_SLOPE) {
         rgb = vec3f(rock);
+    } else if (debug == SB_DEBUG_SKY_IRRADIANCE) {
+        // The SH term alone, no albedo and no sun. Hollows and north faces should
+        // still be lit; if they are black, the ground bounce is not reaching them.
+        rgb = pow(max(sbShIrradiance(n) * exp2(exposure), vec3f(0.0)), vec3f(1.0 / 2.2));
+    } else if (debug == SB_DEBUG_AERIAL) {
+        // How much of this pixel is air. Should reach roughly 1 at the clipmap edge
+        // — anywhere it does not, the terrain's own silhouette is visible against
+        // the sky and Phase 2's far range has work to do.
+        rgb = vec3f(1.0) - transmittance;
     } else {
         let albedo = mix(uniforms.fAlbedo, uniforms.fAlbedoSteep, rock);
 
-        let l = normalize(uniforms.fSunDir);
+        let l = normalize(uniforms.sbSunDir);
         // Snow does want a wrapped term — light does travel through it — but 0.35 at a
         // 12 degree sun flattened every dune face into the same value. Phase 4's real
         // subsurface earns back the softness; until then, definition matters more.
         let wrap = 0.18;
         let ndl = clamp((dot(n, l) + wrap) / (1.0 + wrap), 0.0, 1.0);
 
-        // A cheap sky-occlusion stand-in: hollows see less sky than crests. Phase 2
-        // replaces it with real SH irradiance and the ground-bounce term.
-        let openness = 0.55 + 0.45 * n.y;
+        // Both terms are already Lambertian reflected radiance per unit albedo, so
+        // there is no stray 1/pi and no ambient constant to tune. The sky and the
+        // bounce arrive together in the SH term, which is the whole point: a north
+        // face under a low sun is lit by a hemisphere of snowfield, not by a number.
+        var color = albedo * (sbSunDiffuse() * ndl + sbShIrradiance(n));
 
-        var color = albedo * (uniforms.fSunColor * ndl + uniforms.fAmbient * openness);
+        // Aerial perspective. Extinction over the path, in-scatter the colour the air
+        // in that direction actually is.
+        color = color * transmittance + sbHazeColor(viewDir) * (vec3f(1.0) - transmittance);
 
-        let fog = 1.0 - exp(-dist * uniforms.fParams.x);
-        color = mix(color, uniforms.fFogColor, clamp(fog, 0.0, 1.0));
-        color = color * exp2(uniforms.fParams.y);
+        color = color * exp2(exposure);
 
         // Placeholder transfer. Phase 9 replaces this with AgX in the post chain.
         rgb = pow(max(color, vec3f(0.0)), vec3f(1.0 / 2.2));

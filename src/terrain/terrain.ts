@@ -8,7 +8,8 @@ import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Settings } from "../core/settings";
 import type { BiomeState } from "../core/biome";
 import type { ElementDef } from "../elements/types";
-import type { Environment } from "../render/environment";
+import { Sky, SKY_UNIFORMS, SKY_SAMPLERS, WORLD_GROUP } from "../render/sky";
+import { debugCode } from "../render/debugViews";
 import { Heightfield } from "./heightfield";
 import { buildClipmapMesh, CLIPMAP, type ClipmapStats } from "./clipmapMesh";
 import { compileOrWarn } from "../core/loading";
@@ -21,17 +22,7 @@ import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
 
 const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
 
-const FRAGMENT_UNIFORMS = ["fCameraPos", "fSunDir", "fSunColor", "fAmbient", "fFogColor", "fAlbedo", "fAlbedoSteep", "fParams"];
-
-/** Debug views this material can render, keyed by the settings enum value. */
-const DEBUG_CODES: Record<string, number> = {
-    off: 0,
-    normals: 1,
-    "terrain.rings": 2,
-    "terrain.morph": 3,
-    linearDepth: 4,
-    "terrain.slope": 5,
-};
+const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoSteep", "fParams", ...SKY_UNIFORMS];
 
 export class Terrain {
     readonly field: Heightfield;
@@ -41,6 +32,7 @@ export class Terrain {
 
     private readonly _settings: Settings;
     private readonly _biome: BiomeState;
+    private readonly _sky: Sky;
     private readonly _disposers: (() => void)[] = [];
 
     private readonly _center = new Vector2(0, 0);
@@ -51,9 +43,10 @@ export class Terrain {
     private _element: ElementDef;
     private _rebakeQueued = false;
 
-    constructor(scene: Scene, settings: Settings, biome: BiomeState) {
+    constructor(scene: Scene, settings: Settings, biome: BiomeState, sky: Sky) {
         this._settings = settings;
         this._biome = biome;
+        this._sky = sky;
         this._element = biome.current;
 
         this.field = new Heightfield(scene, settings);
@@ -69,16 +62,20 @@ export class Terrain {
             {
                 attributes: ["position"],
                 uniforms: [...VERTEX_UNIFORMS, ...FRAGMENT_UNIFORMS],
-                samplers: ["sbFieldTex"],
+                samplers: ["sbFieldTex", ...SKY_SAMPLERS],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
         );
         // Winding is derived to match Babylon's ground builder, but culling stays off
-        // through Phase 1 so a winding mistake cannot make the terrain invisible.
-        // Phase 2 turns it on, when shadow casting starts to care about facing.
+        // so a winding mistake cannot make the terrain invisible. Phase 2's second
+        // pass turns it on, when the shadow cascades start to care about facing and
+        // there is a rendered result to check it against in the same sitting.
         this.material.backFaceCulling = false;
         this.material.setTexture("sbFieldTex", this.field.texture);
+        sky.bindTo(this.material);
         this.mesh.material = this.material;
+        // Over the sky, which draws first and writes no depth.
+        this.mesh.renderingGroupId = WORLD_GROUP;
 
         this._fieldOrigin.set(this.field.originX, this.field.originZ);
 
@@ -118,7 +115,7 @@ export class Terrain {
     }
 
     /** Push per-frame uniforms. Allocation-free. */
-    update(camera: Camera, env: Environment): void {
+    update(camera: Camera): void {
         const s = this._settings.v;
         const mesh = this.mesh;
         mesh.setEnabled(s["sys.terrain"]);
@@ -140,14 +137,11 @@ export class Terrain {
         m.setFloat("sbHeightScale", s["terrain.heightScale"]);
 
         m.setVector3("fCameraPos", camPos);
-        m.setVector3("fSunDir", env.sunDir);
-        m.setColor3("fSunColor", env.sunColor);
-        m.setColor3("fAmbient", env.ambient);
-        m.setColor3("fFogColor", env.skyLinear);
         m.setColor3("fAlbedo", this._albedo);
         m.setColor3("fAlbedoSteep", this._albedoSteep);
+        this._sky.pushTo(m);
 
-        this._params.set(env.fogDensity, s["render.exposure"], DEBUG_CODES[s["debug.view"]] ?? 0, CLIPMAP.levels);
+        this._params.set(s["render.exposure"], debugCode(s["debug.view"]), CLIPMAP.levels, 0);
         m.setVector4("fParams", this._params);
     }
 

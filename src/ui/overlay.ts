@@ -39,6 +39,9 @@ export class Overlay {
     private readonly _instr: SceneInstrumentation;
     private readonly _refreshers = new Map<SettingKey, () => void>();
     private readonly _disposers: (() => void)[] = [];
+    private readonly _counters: [string, () => string][] = [];
+    /** Reused every paint so the scene panel allocates nothing at overlay rate. */
+    private readonly _sceneRows: [string, string][] = [];
 
     private readonly _hist = new Float32Array(GRAPH_SAMPLES);
     private _graph!: HTMLCanvasElement;
@@ -129,6 +132,19 @@ export class Overlay {
 
     toggle(): void {
         this._d.settings.set("ui.overlayOpen", !this.open);
+    }
+
+    /**
+     * Register an extra row for the scene panel.
+     *
+     * The overlay stays generic — it never imports a system. A system that has a
+     * number worth watching hands one over, the same way a GPU pass registers a
+     * counter provider rather than a counter. The sky's rebake count is the first:
+     * a bake is invisible in both the frame graph and the main-pass GPU timing, so
+     * without this a rebake storm would cost time nothing on screen accounts for.
+     */
+    addCounter(label: string, read: () => string): void {
+        this._counters.push([label, read]);
     }
 
     /** Register a one-click demo button. Phase 10 hangs the element interactions off this. */
@@ -398,11 +414,15 @@ export class Overlay {
             ["cpu frame", `${perf.cpuFrameMs.toFixed(2)} ms`],
         ]);
 
-        setRows(this._sceneBody, "scene", [
-            ["draw calls", String(this._instr.drawCallsCounter.current)],
-            ["triangles", formatCount(scene.getActiveIndices() / 3)],
-            ["active meshes", String(scene.getActiveMeshes().length)],
-        ]);
+        const sceneRows = this._sceneRows;
+        sceneRows.length = 0;
+        sceneRows.push(["draw calls", String(this._instr.drawCallsCounter.current)]);
+        sceneRows.push(["triangles", formatCount(scene.getActiveIndices() / 3)]);
+        sceneRows.push(["active meshes", String(scene.getActiveMeshes().length)]);
+        for (let i = 0; i < this._counters.length; i++) {
+            sceneRows.push([this._counters[i][0], this._counters[i][1]()]);
+        }
+        setRows(this._sceneBody, "scene", sceneRows);
 
         if (!gpu.supported) {
             setRows(this._gpuBody, "gpu passes", [["unavailable", "no timestamp-query"]], true);

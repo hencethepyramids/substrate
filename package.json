@@ -6,9 +6,10 @@
   "description": "Four elements, one simulation core. WebGPU procedural tech demo.",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && node scripts/checkShaders.mjs && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:shaders": "node scripts/checkShaders.mjs"
   },
   "license": "ISC",
   "dependencies": {
