@@ -2,6 +2,11 @@
 
 Four elements, one simulation core. WebGPU, zero assets, hand-written WGSL.
 
+[![CI](https://github.com/hencethepyramids/substrate/actions/workflows/ci.yml/badge.svg)](https://github.com/hencethepyramids/substrate/actions/workflows/ci.yml)
+[![Deploy](https://github.com/hencethepyramids/substrate/actions/workflows/deploy.yml/badge.svg)](https://github.com/hencethepyramids/substrate/actions/workflows/deploy.yml)
+
+**Live: https://hencethepyramids.github.io/substrate/**
+
 ```
 npm run dev        # http://localhost:5173
 npm run typecheck  # tsc --noEmit
@@ -10,6 +15,16 @@ npm run build      # typecheck + vite build
 
 Requires WebGPU (Chrome/Edge 113+, Firefox 141+). There is no WebGL fallback — the
 capability gate prints a message and stops.
+
+## Automation
+
+| Workflow | Trigger | Does |
+| --- | --- | --- |
+| [CI](.github/workflows/ci.yml) | push to `main`, any PR | typecheck, build, upload `dist` as a 7-day artifact |
+| [Deploy](.github/workflows/deploy.yml) | push to `main` | builds with `VITE_BASE=/substrate/` and publishes to GitHub Pages |
+
+Typecheck and build are separate steps on purpose — a type error and a bundling
+error should be two distinct red steps, not one ambiguous failure.
 
 ---
 
