@@ -40,13 +40,13 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 2 pass A (sky and lighting) complete
+## Status: Phase 2 — sky, lighting and shadow cascades complete
 
 | Phase | State |
 | --- | --- |
 | 0 — harness | done |
 | 1 — terrain | done |
-| 2 — sky, lighting, atmosphere | pass A done, pass B (shadows, far range) next |
+| 2 — sky, lighting, atmosphere | pass A done; pass B cascades done, far range next |
 | 3 — substrate buffer | not started |
 | 4 — surface materials | not started |
 | 5 — air | not started |
@@ -219,9 +219,8 @@ with one line: `gpu.register("substrate", () => substrateRT.gpuTimeInFrame)`.
 
 ### Deliberately deferred
 
-`sys.shadows` and `sys.farRange` are pass B. `debug.view`'s `cascades` and `shadowMap`
-entries go with them. The remaining `sys.*` toggles and most of the `post.*` group are
-wired into settings but have nothing behind them yet — they exist so later phases plug in
+`sys.farRange` is the rest of pass B. The remaining `sys.*` toggles and most of the
+`post.*` group are wired into settings but have nothing behind them yet — they exist so later phases plug in
 without touching the overlay, and per rule 3 ("a toggle for every subsystem that
 will ever exist"). Each phase implements its own entries.
 
