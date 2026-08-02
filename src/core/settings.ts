@@ -170,7 +170,12 @@ export type SettingsValues = { [K in SettingKey]: SettingValue<K> };
 
 export type SettingListener<K extends SettingKey = SettingKey> = (value: SettingValue<K>, key: K) => void;
 
-const STORAGE_KEY = "substrate.settings.v1";
+/**
+ * Bumped whenever the schema changes materially. Phase 1 added the Terrain group and
+ * new debug views; more importantly, a stale persisted `ui.overlayOpen: false` from an
+ * earlier build would hide the overlay on first run with no obvious way to know why.
+ */
+const STORAGE_KEY = "substrate.settings.v2";
 
 export class Settings {
     /** Direct value access for the hot path: `settings.v["sys.terrain"]`. */

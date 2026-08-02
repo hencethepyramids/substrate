@@ -11,6 +11,7 @@ import type { ElementDef } from "../elements/types";
 import type { Environment } from "../render/environment";
 import { Heightfield } from "./heightfield";
 import { buildClipmapMesh, CLIPMAP, type ClipmapStats } from "./clipmapMesh";
+import { compileOrWarn } from "../core/loading";
 import terrainVertex from "../shaders/terrain.vertex.wgsl?raw";
 import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
 
@@ -94,10 +95,19 @@ export class Terrain {
 
     /** Compiles the pipeline and bakes the field. Runs behind the loading screen. */
     async prepare(report?: (fraction: number) => void): Promise<void> {
-        await this.field.bake(this._element, (f) => report?.(f * 0.9));
-        await this.material.forceCompilationAsync(this.mesh);
+        try {
+            await this.field.bake(this._element, (f) => report?.(f * 0.9));
+        } catch (err) {
+            // A failed bake leaves a flat field. Still worth booting: the sky, the
+            // capsule and the overlay all come up, and the console says why.
+            console.error("[substrate] heightfield bake failed:", err);
+        }
+        this.compiled = await compileOrWarn("terrain", () => this.material.forceCompilationAsync(this.mesh));
         report?.(1);
     }
+
+    /** False if the terrain material failed to compile. The rest of the scene still draws. */
+    compiled = false;
 
     get ready(): boolean {
         return this.field.mirrorValid && this.material.isReady(this.mesh);

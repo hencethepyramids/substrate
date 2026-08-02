@@ -2,9 +2,9 @@ import { Scene } from "@babylonjs/core/scene";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
 import type { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 
-import { probeWebGPU, showCapabilityFailure } from "./core/capability";
+import { probeWebGPU, showCapabilityFailure, showFatalError } from "./core/capability";
 import { createEngine, bindEngineSettings } from "./core/engine";
-import { LoadingScreen, nextFrame } from "./core/loading";
+import { LoadingScreen, nextFrame, compileOrWarn } from "./core/loading";
 import { Settings } from "./core/settings";
 import { BiomeState } from "./core/biome";
 import { Perf } from "./core/perf";
@@ -87,7 +87,7 @@ async function boot(): Promise<void> {
 
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
     loader.add("compiling pipelines", 5, async (report) => {
-        await character.material.forceCompilationAsync(character.mesh);
+        const characterOk = await compileOrWarn("character", () => character.material.forceCompilationAsync(character.mesh));
         report(0.5);
 
         mover.teleport(0, 0);
@@ -105,6 +105,15 @@ async function boot(): Promise<void> {
             if (terrain.ready && character.isReady() && scene.isReady()) break;
             await nextFrame();
         }
+
+        // Say plainly what came up. A partially-drawn scene is diagnosable; a black
+        // rectangle with a clean console is not.
+        console.info(
+            `[substrate] boot: terrain material ${terrain.compiled ? "ok" : "FAILED"}, ` +
+                `character material ${characterOk ? "ok" : "FAILED"}, ` +
+                `height mirror ${terrain.field.mirrorValid ? "ok" : "FAILED"}, ` +
+                `ground at origin ${terrain.field.sampleHeight(0, 0).toFixed(2)} m`,
+        );
         report(1);
     });
 
@@ -228,5 +237,5 @@ function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig
 
 boot().catch((err) => {
     console.error("[substrate] fatal", err);
-    showCapabilityFailure(err instanceof Error ? err.message : String(err));
+    showFatalError(err instanceof Error ? err.message : String(err));
 });

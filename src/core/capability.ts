@@ -77,6 +77,20 @@ export async function probeWebGPU(): Promise<Capability> {
 
 /** Prints the reason and stops. No fallback, by design. */
 export function showCapabilityFailure(reason: string): void {
+    showPanel("WebGPU is required", reason, "Chrome 113+, Edge 113+, or Firefox 141+ on a machine with a discrete GPU. There is no WebGL fallback.");
+}
+
+/**
+ * Boot failed for a reason that has nothing to do with WebGPU support.
+ *
+ * Kept separate because reporting a shader bug as "WebGPU is required" sends whoever
+ * is debugging it to entirely the wrong place.
+ */
+export function showFatalError(reason: string): void {
+    showPanel("Boot failed", reason, "Open the browser console for the full error and the shader source.");
+}
+
+function showPanel(title: string, reason: string, hint: string): void {
     const stage = document.getElementById("stage");
     if (!stage) return;
     stage.innerHTML = "";
@@ -95,12 +109,9 @@ export function showCapabilityFailure(reason: string): void {
     ].join(";");
     panel.innerHTML = `
     <div style="font-size:13px;letter-spacing:.42em;color:#5b6b7d">SUBSTRATE</div>
-    <div style="font-size:22px;font-weight:600;color:#e6edf3">WebGPU is required</div>
-    <div style="max-width:52ch;font-size:13px;line-height:1.6;color:#8a9bab">${escapeHtml(reason)}</div>
-    <div style="max-width:52ch;font-size:12px;line-height:1.6;color:#5b6b7d">
-      Chrome 113+, Edge 113+, or Firefox 141+ on a machine with a discrete GPU.
-      There is no WebGL fallback.
-    </div>`;
+    <div style="font-size:22px;font-weight:600;color:#e6edf3">${escapeHtml(title)}</div>
+    <div style="max-width:64ch;font-size:13px;line-height:1.6;color:#8a9bab">${escapeHtml(reason)}</div>
+    <div style="max-width:64ch;font-size:12px;line-height:1.6;color:#5b6b7d">${escapeHtml(hint)}</div>`;
     stage.appendChild(panel);
 }
 

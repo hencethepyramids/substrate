@@ -133,3 +133,32 @@ export class LoadingScreen {
 export function nextFrame(): Promise<void> {
     return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
+
+/**
+ * Warm one pipeline without letting it take the whole boot down.
+ *
+ * A WGSL compile error must not be able to produce a blank screen with nothing to
+ * look at: Babylon's forceCompilation polls until the effect is ready, so a shader
+ * that will never compile hangs the loading screen forever rather than reporting
+ * anything. Time it out, log loudly, and carry on — a scene missing one material is
+ * diagnosable, a black rectangle is not.
+ *
+ * @returns true if the pipeline is ready, false if it timed out or errored.
+ */
+export async function compileOrWarn(label: string, compile: () => Promise<unknown>, timeoutMs = 8000): Promise<boolean> {
+    let timer = 0;
+    try {
+        await Promise.race([
+            compile(),
+            new Promise((_, reject) => {
+                timer = window.setTimeout(() => reject(new Error(`not ready after ${timeoutMs} ms — check the console for a WGSL compile error`)), timeoutMs);
+            }),
+        ]);
+        return true;
+    } catch (err) {
+        console.error(`[substrate] pipeline "${label}" did not compile:`, err);
+        return false;
+    } finally {
+        if (timer !== 0) clearTimeout(timer);
+    }
+}
