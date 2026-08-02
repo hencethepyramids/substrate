@@ -22,6 +22,9 @@ uniform shMatrix2: mat4x4f;
 uniform shSplits: vec4f;
 /// World metres covered by one shadow texel, per cascade. w unused.
 uniform shTexelWorld: vec4f;
+/// Depth range over lateral extent, per cascade. Converts a depth difference into
+/// the same units the uv offsets are in. w unused.
+uniform shDepthScale: vec4f;
 /// x: enabled. y: depth bias in light-space units. z: normal-offset in texels.
 /// w: light angular size, as a fraction of a cascade's extent.
 uniform shParams: vec4f;
@@ -69,6 +72,16 @@ fn shTexelWorldFor(c: i32) -> f32 {
     return t;
 }
 
+fn shDepthScaleFor(c: i32) -> f32 {
+    var t = uniforms.shDepthScale.z;
+    if (c == 0) {
+        t = uniforms.shDepthScale.x;
+    } else if (c == 1) {
+        t = uniforms.shDepthScale.y;
+    }
+    return t;
+}
+
 /// Vogel disk. A spiral rather than a stored Poisson set: no array to index
 /// dynamically, even coverage at any tap count, and the per-pixel rotation turns
 /// what would be visible banding into noise that Phase 9's TAA can eat.
@@ -109,7 +122,9 @@ fn shCascadeVisibility(c: i32, world: vec3f, n: vec3f, ndl: f32) -> f32 {
 
         // 1. Blocker search.
         let searchTaps = i32(clamp(uniforms.shControl.y, 4.0, 32.0));
-        let searchRadius = uniforms.shParams.w * (0.5 + 2.0 * uniforms.shControl.z);
+        // Wide enough for the penumbra a blocker halfway through the cascade would
+        // cast, capped so the search cannot wander a twentieth of the map away.
+        let searchRadius = clamp(uniforms.shParams.w * uniforms.shControl.z * shDepthScaleFor(c) * 0.5, shTexelUv().y, 0.05);
         var blockerSum = 0.0;
         var blockerCount = 0.0;
         for (var i = 0; i < searchTaps; i = i + 1) {
@@ -121,11 +136,22 @@ fn shCascadeVisibility(c: i32, world: vec3f, n: vec3f, ndl: f32) -> f32 {
         }
 
         if (blockerCount > 0.0) {
-            // 2. Penumbra width from the similar-triangles estimate. Floored at one
-            //    texel so a fully occluded contact still filters over something.
+            // 2. Penumbra width. The textbook PCSS ratio divides by the blocker
+            //    depth, but that is the PERSPECTIVE form — it assumes the light is a
+            //    point and the shadow map diverges from it. These cascades are
+            //    orthographic: a directional light's penumbra grows with the
+            //    receiver-to-blocker separation alone, at a rate set by the sun's
+            //    angular size. Dividing by blocker here made the penumbra depend on
+            //    where the caster happened to sit between the near and far planes,
+            //    which is a number with no physical meaning at all.
+            //
+            //    Floored at one texel so a fully occluded contact still filters over
+            //    something. One texel in CASCADE uv is 1/resolution, which is what
+            //    shTexelUv().y is — the x component is a third of that because the
+            //    atlas is three cascades wide, and shDepthAt does that fold itself.
             let blocker = blockerSum / blockerCount;
-            let ratio = (receiver - blocker) / max(blocker, 1e-4);
-            let radius = max(uniforms.shParams.w * ratio * uniforms.shControl.z, shTexelUv().y * SH_CASCADES);
+            let separation = max(receiver - blocker, 0.0) * shDepthScaleFor(c);
+            let radius = max(uniforms.shParams.w * uniforms.shControl.z * separation, shTexelUv().y);
 
             // 3. PCF at that radius.
             let taps = i32(clamp(uniforms.shControl.x, 4.0, 64.0));

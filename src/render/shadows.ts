@@ -44,7 +44,7 @@ const SPLIT_LAMBDA = 0.82;
 
 const CLEAR = new Color4(1, 1, 1, 1);
 
-export const SHADOW_UNIFORMS = ["shMatrix0", "shMatrix1", "shMatrix2", "shSplits", "shTexelWorld", "shParams", "shControl"] as const;
+export const SHADOW_UNIFORMS = ["shMatrix0", "shMatrix1", "shMatrix2", "shSplits", "shTexelWorld", "shDepthScale", "shParams", "shControl"] as const;
 export const SHADOW_SAMPLERS = ["shMap"] as const;
 
 export class Shadows {
@@ -71,6 +71,7 @@ export class Shadows {
     private readonly _tile = new Vector2(1 / CASCADES, 0);
     private readonly _splits = new Vector4(0, 0, 0, 0);
     private readonly _texelWorld = new Vector4(0, 0, 0, 0);
+    private readonly _depthScale = new Vector4(0, 0, 0, 0);
     private readonly _params = new Vector4(0, 0, 0, 0);
     private readonly _control = new Vector4(0, 0, 0, 0);
     private readonly _eye = new Vector3(0, 0, 0);
@@ -239,6 +240,7 @@ export class Shadows {
         material.setMatrix("shMatrix2", this._matrices[2]);
         material.setVector4("shSplits", this._splits);
         material.setVector4("shTexelWorld", this._texelWorld);
+        material.setVector4("shDepthScale", this._depthScale);
         material.setVector4("shParams", this._params);
         material.setVector4("shControl", this._control);
     }
@@ -363,6 +365,13 @@ export class Shadows {
         // the light view matrix is the only way to snap along the axes the shadow map
         // actually samples.
         const depth = radius * 2 + this._settings.v["shadow.depthRange"];
+        // Depth is normalised over `depth` metres and uv over `2 * radius` metres.
+        // This is the conversion between them, and without it a penumbra computed
+        // from a depth difference is in the wrong units entirely.
+        const depthScale = depth / (2 * radius);
+        if (c === 0) this._depthScale.x = depthScale;
+        else if (c === 1) this._depthScale.y = depthScale;
+        else this._depthScale.z = depthScale;
         this._eye.set(this._centre.x + sun.x * depth * 0.5, this._centre.y + sun.y * depth * 0.5, this._centre.z + sun.z * depth * 0.5);
         Matrix.LookAtLHToRef(this._eye, this._centre, this._up, this._lightView);
 
