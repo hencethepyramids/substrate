@@ -6,6 +6,7 @@ import terrainField from "./terrainField.wgsl?raw";
 import terrainParams from "./terrainParams.wgsl?raw";
 import clipmap from "./clipmap.wgsl?raw";
 import shadow from "./shadow.wgsl?raw";
+import farField from "./farField.wgsl?raw";
 import atmosphere from "./atmosphere.wgsl?raw";
 import sh from "./sh.wgsl?raw";
 import skyMap from "./skyMap.wgsl?raw";
@@ -39,6 +40,7 @@ export function registerShaderIncludes(): void {
     store["substrateTerrainParams"] = terrainParams;
     store["substrateClipmap"] = clipmap;
     store["substrateShadow"] = shadow;
+    store["substrateFarField"] = farField;
     store["substrateAtmosphere"] = atmosphere;
     store["substrateSh"] = sh;
     store["substrateSkyMap"] = skyMap;
