@@ -110,26 +110,47 @@ fn shCascadeVisibility(c: i32, world: vec3f, n: vec3f, ndl: f32) -> f32 {
     let slope = clamp(1.0 - ndl, 0.0, 1.0);
     let offset = world + n * (texelWorld * uniforms.shParams.z * (0.5 + slope));
 
-    let proj = shMatrixFor(c) * vec4f(offset, 1.0);
+    let m = shMatrixFor(c);
+    let proj = m * vec4f(offset, 1.0);
     let ndc = proj.xyz / proj.w;
     let uv = ndc.xy * 0.5 + vec2f(0.5);
     let receiver = ndc.z;
+
+    // RECEIVER PLANE DEPTH BIAS.
+    //
+    // A constant bias only works if every tap lands on the receiver itself. These
+    // taps wander — over a metre in the near cascade — and a tap that far away on a
+    // 15 degree slope sits a third of a metre nearer the light, so the surface
+    // reports ITSELF as its own occluder and everything goes dark. That is what was
+    // happening: shadow that scaled with the filter radius rather than with any
+    // actual caster.
+    //
+    // The fix is to compare against the depth the receiver's own tangent plane would
+    // have at each tap, not against a single depth. The gradient falls straight out
+    // of the normal: transforming it by the cascade matrix already folds in the
+    // ortho scales, so d(depth)/d(uv) is just -2 * nl.xy / nl.z. Clamped because a
+    // surface edge-on to the light has an infinite one.
+    let nl = (m * vec4f(n, 0.0)).xyz;
+    let denom = select(min(nl.z, -1e-3), max(nl.z, 1e-3), nl.z >= 0.0);
+    let plane = clamp(-2.0 * nl.xy / denom, vec2f(-64.0), vec2f(64.0));
 
     var visibility = 1.0;
     if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0 && receiver > 0.0 && receiver < 1.0) {
         let bias = uniforms.shParams.y * (1.0 + 2.0 * slope);
         let rotation = shDither(world);
 
-        // 1. Blocker search.
+        // 1. Blocker search. Deliberately NOT scaled by softness: softness is how
+        //    wide the penumbra gets, not whether a caster is found at all, and
+        //    folding it in here meant softness 0 stopped finding blockers and
+        //    produced no shadows rather than hard ones.
         let searchTaps = i32(clamp(uniforms.shControl.y, 4.0, 32.0));
-        // Wide enough for the penumbra a blocker halfway through the cascade would
-        // cast, capped so the search cannot wander a twentieth of the map away.
-        let searchRadius = clamp(uniforms.shParams.w * uniforms.shControl.z * shDepthScaleFor(c) * 0.5, shTexelUv().y, 0.05);
+        let searchRadius = clamp(uniforms.shParams.w * shDepthScaleFor(c) * 0.5, shTexelUv().y * 2.0, 0.05);
         var blockerSum = 0.0;
         var blockerCount = 0.0;
         for (var i = 0; i < searchTaps; i = i + 1) {
-            let d = shDepthAt(c, uv + shDiskTap(i, searchTaps, rotation) * searchRadius);
-            if (d < receiver - bias) {
+            let duv = shDiskTap(i, searchTaps, rotation) * searchRadius;
+            let d = shDepthAt(c, uv + duv);
+            if (d < receiver + dot(plane, duv) - bias) {
                 blockerSum = blockerSum + d;
                 blockerCount = blockerCount + 1.0;
             }
@@ -157,8 +178,9 @@ fn shCascadeVisibility(c: i32, world: vec3f, n: vec3f, ndl: f32) -> f32 {
             let taps = i32(clamp(uniforms.shControl.x, 4.0, 64.0));
             var lit = 0.0;
             for (var i = 0; i < taps; i = i + 1) {
-                let d = shDepthAt(c, uv + shDiskTap(i, taps, rotation) * radius);
-                lit = lit + select(1.0, 0.0, d < receiver - bias);
+                let duv = shDiskTap(i, taps, rotation) * radius;
+                let d = shDepthAt(c, uv + duv);
+                lit = lit + select(1.0, 0.0, d < receiver + dot(plane, duv) - bias);
             }
             visibility = lit / f32(taps);
         }

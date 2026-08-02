@@ -217,8 +217,9 @@ async function boot(): Promise<void> {
         character.update(rig.camera);
         perf.end(S_UNIFORMS);
 
-        // After the uniforms the cast materials share with the beauty pass, before
-        // scene.render(): the atlas has to be written before anything samples it.
+        // Fit and render the cascades before scene.render() samples them. terrain
+        // .update() has already fed the cast material the clipmap numbers the beauty
+        // pass will use, so both passes displace from the same frame's values.
         perf.begin(S_SHADOWS);
         shadows.update(rig.camera);
         perf.end(S_SHADOWS);
