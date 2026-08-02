@@ -32,6 +32,28 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     fragmentOutputs.color = vec4f(input.vUV.y, 0.0, 0.0, 1.0);
 }`;
 
+/**
+ * Asks the GPU what it thinks the ground height is, through the exact include the
+ * terrain vertex shader uses, so the CPU mirror can be checked against it.
+ *
+ * Samples an oblique line (z = 0.37x) so that a whole-field Z flip changes the
+ * answer — along an axis-aligned line it would not. Each texel reports the height AND
+ * the coordinate it was taken at, so matching texels to world positions needs no
+ * assumption about which way readPixels orders its rows.
+ */
+const VERIFY_SOURCE = `
+#include<substratePack>
+#include<substrateTerrainField>
+varying vUV: vec2f;
+uniform vfOrigin: f32;
+uniform vfExtent: f32;
+@fragment
+fn main(input: FragmentInputs) -> FragmentOutputs {
+    let t = uniforms.vfOrigin + input.vUV.x * uniforms.vfExtent;
+    let h = sbSampleField(vec2f(t, t * 0.37));
+    fragmentOutputs.color = vec4f(h.x, t, 0.0, 1.0);
+}`;
+
 export class Heightfield {
     readonly size = FIELD_SIZE;
     readonly extent = FIELD_EXTENT;
@@ -109,6 +131,7 @@ export class Heightfield {
 
             await this._refreshMirror(report);
             this._mirrorValid = true;
+            await this._verifyMirror();
         } finally {
             this._baking = false;
         }
@@ -118,6 +141,11 @@ export class Heightfield {
 
     /** Height in metres, matching sbSampleField in the shared include. */
     sampleHeight(x: number, z: number): number {
+        return this._sampleRaw(x, z) * this._settings.v["terrain.heightScale"];
+    }
+
+    /** Unscaled bilinear lookup. The verification pass compares against this. */
+    private _sampleRaw(x: number, z: number): number {
         if (!this._mirrorValid) return 0;
 
         const tx = (x - this.originX) * this._texelsPerMetre - 0.5;
@@ -141,7 +169,7 @@ export class Heightfield {
 
         const top = h00 + (h10 - h00) * fx;
         const bottom = h01 + (h11 - h01) * fx;
-        return (top + (bottom - top) * fz) * this._settings.v["terrain.heightScale"];
+        return top + (bottom - top) * fz;
     }
 
     /**
@@ -261,6 +289,95 @@ export class Heightfield {
             }
         } finally {
             probe.dispose();
+        }
+    }
+
+    /**
+     * Check the CPU mirror against the surface the GPU actually draws, and flip it if
+     * they disagree.
+     *
+     * A whole-field Z flip is invisible — noise looks the same mirrored — so the
+     * terrain would render perfectly while the character walked through hills,
+     * following the right heights from the wrong place. Rather than reason about
+     * which way NDC maps to texel rows and be wrong, ask the renderer.
+     */
+    private async _verifyMirror(): Promise<void> {
+        const probe = new ProceduralTexture(
+            "terrainFieldVerify",
+            64,
+            { fragmentSource: VERIFY_SOURCE },
+            this._scene,
+            {
+                shaderLanguage: ShaderLanguage.WGSL,
+                format: Constants.TEXTUREFORMAT_RG,
+                type: Constants.TEXTURETYPE_FLOAT,
+                samplingMode: Constants.TEXTURE_NEAREST_SAMPLINGMODE,
+                generateMipMaps: false,
+                skipSceneRegistration: true,
+            },
+        );
+        probe.refreshRate = 0;
+        try {
+            probe.setTexture("sbFieldTex", this.texture);
+            probe.setVector2("sbFieldOrigin", this._origin);
+            probe.setFloat("sbFieldExtent", FIELD_EXTENT);
+            probe.setFloat("sbFieldSize", FIELD_SIZE);
+            // Compare unscaled, so the height slider cannot skew the verdict.
+            probe.setFloat("sbHeightScale", 1);
+            probe.setFloat("vfOrigin", this.originX);
+            probe.setFloat("vfExtent", FIELD_EXTENT);
+
+            for (let guard = 0; guard < 600 && !probe.isReady(); guard++) {
+                await nextFrame();
+            }
+            probe.render();
+
+            const data = (await probe.readPixels(0, 0, null, true, false, 0, 0, 64, 1)) as Float32Array | null;
+            if (!data || data.length < 64) {
+                console.warn("[substrate] mirror verification skipped: no probe data");
+                return;
+            }
+            const components = Math.max(1, Math.round(data.length / 64));
+
+            const asRead = this._mirrorError(data, components);
+            this._flipMirrorZ();
+            const flipped = this._mirrorError(data, components);
+            if (asRead <= flipped) this._flipMirrorZ();
+
+            const best = Math.min(asRead, flipped);
+            const worst = Math.max(asRead, flipped);
+            console.info(`[substrate] height mirror orientation: ${asRead <= flipped ? "as read" : "FLIPPED to match the GPU"} (error ${best.toFixed(4)} m, other orientation ${worst.toFixed(2)} m)`);
+            if (best > 0.05) {
+                console.warn(`[substrate] mirror still disagrees with the drawn surface by ${best.toFixed(3)} m — grounding will be wrong`);
+            }
+        } catch (err) {
+            console.warn("[substrate] mirror verification failed:", err);
+        } finally {
+            probe.dispose();
+        }
+    }
+
+    /** Mean absolute disagreement, in metres, between the mirror and the GPU probe. */
+    private _mirrorError(data: Float32Array, components: number): number {
+        let sum = 0;
+        for (let i = 0; i < 64; i++) {
+            const gpuHeight = data[i * components];
+            const t = data[i * components + 1];
+            sum += Math.abs(gpuHeight - this._sampleRaw(t, t * 0.37));
+        }
+        return sum / 64;
+    }
+
+    /** Reverse the mirror's row order in place. One pass over 67 MB. */
+    private _flipMirrorZ(): void {
+        const row = new Float32Array(FIELD_SIZE);
+        const h = this._heights;
+        for (let top = 0, bottom = FIELD_SIZE - 1; top < bottom; top++, bottom--) {
+            const a = top * FIELD_SIZE;
+            const b = bottom * FIELD_SIZE;
+            row.set(h.subarray(a, a + FIELD_SIZE));
+            h.copyWithin(a, b, b + FIELD_SIZE);
+            h.set(row, b);
         }
     }
 
