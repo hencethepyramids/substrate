@@ -66,7 +66,10 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         let albedo = mix(uniforms.fAlbedo, uniforms.fAlbedoSteep, rock);
 
         let l = normalize(uniforms.fSunDir);
-        let wrap = 0.35;
+        // Snow does want a wrapped term — light does travel through it — but 0.35 at a
+        // 12 degree sun flattened every dune face into the same value. Phase 4's real
+        // subsurface earns back the softness; until then, definition matters more.
+        let wrap = 0.18;
         let ndl = clamp((dot(n, l) + wrap) / (1.0 + wrap), 0.0, 1.0);
 
         // A cheap sky-occlusion stand-in: hollows see less sky than crests. Phase 2

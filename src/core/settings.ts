@@ -152,7 +152,7 @@ export const SCHEMA = {
 
     // -- Perf ----------------------------------------------------------------
     "perf.gpuTiming": bool({ group: "Perf", label: "GPU timestamp queries", def: true, hint: "Requires the timestamp-query feature." }),
-    "perf.graphRangeMs": num({ group: "Perf", label: "Graph range", def: 24, min: 4, max: 64, step: 1, unit: "ms" }),
+    "perf.graphRangeMs": num({ group: "Perf", label: "Graph range", def: 12, min: 4, max: 64, step: 1, unit: "ms" }),
     "perf.targetFps": num({ group: "Perf", label: "Target FPS line", def: 90, min: 30, max: 360, step: 10 }),
     "perf.overlayScale": num({ group: "Perf", label: "Overlay scale", def: 1, min: 0.75, max: 1.6, step: 0.05 }),
 

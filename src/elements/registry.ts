@@ -19,22 +19,31 @@ const SNOW: ElementDef = {
     sunTint: [1.0, 0.976, 0.945],
     terrain: {
         // Broad transverse ridges on one long swell, with sparse rock breaking through.
+        //
+        // Amplitudes read high because sbFbmD normalises by the sum of its octave
+        // amplitudes and gradient noise sits around +-0.35 after that, so the relief
+        // you actually get is roughly a third of the number here. What matters is the
+        // ratio to wavelength: 20 m over 70 m is a ~15 degree face, which reads as a
+        // drift. The first pass used 9 m over 95 m — about 4 degrees — and looked like
+        // a flat field with a wobble in it.
         swellAmp: 38,
         swellFreq: 1 / 900,
-        duneAmp: 9,
-        duneFreq: 1 / 95,
+        duneAmp: 20,
+        duneFreq: 1 / 70,
         duneStretch: 3.4,
         duneOctaves: 4,
         shearAmp: 26,
         shearFreq: 1 / 260,
-        detailAmp: 2.6,
-        detailFreq: 1 / 26,
-        damping: 1.4,
+        detailAmp: 4.5,
+        detailFreq: 1 / 18,
+        damping: 0.9,
         ridgeAmp: 0,
         ridgeFreq: 0,
-        outcropAmp: 14,
-        outcropFreq: 1 / 210,
-        outcropThreshold: 0.42,
+        // Outcrops have to be small to read as rock. Spread over 200 m they were just
+        // another swell.
+        outcropAmp: 18,
+        outcropFreq: 1 / 70,
+        outcropThreshold: 0.3,
         channelDepth: 0,
         channelFreq: 0,
     },
@@ -88,20 +97,23 @@ const DESERT: ElementDef = {
         // sharper slip faces, and heavy damping to flatten the interdunes to hardpan.
         swellAmp: 30,
         swellFreq: 1 / 1100,
-        duneAmp: 22,
-        duneFreq: 1 / 80,
+        // Nearly twice snow's relief at a similar wavelength: ~30 degree faces, which
+        // is what a slip face at the angle of repose should look like.
+        duneAmp: 40,
+        duneFreq: 1 / 85,
         duneStretch: 4.2,
         duneOctaves: 4,
-        shearAmp: 40,
+        shearAmp: 55,
         shearFreq: 1 / 240,
-        detailAmp: 1.6,
-        detailFreq: 1 / 22,
-        damping: 2.2,
+        detailAmp: 2.4,
+        detailFreq: 1 / 16,
+        // Heavy damping flattens the interdunes toward exposed hardpan.
+        damping: 1.8,
         ridgeAmp: 0,
         ridgeFreq: 0,
-        outcropAmp: 5,
-        outcropFreq: 1 / 250,
-        outcropThreshold: 0.55,
+        outcropAmp: 8,
+        outcropFreq: 1 / 90,
+        outcropThreshold: 0.42,
         channelDepth: 0,
         channelFreq: 0,
     },
@@ -155,22 +167,24 @@ const VOLCANIC: ElementDef = {
         // carved channels that Phase 6 fills with lava.
         swellAmp: 26,
         swellFreq: 1 / 1250,
-        duneAmp: 4,
+        duneAmp: 8,
         duneFreq: 1 / 125,
         duneStretch: 1.4,
         duneOctaves: 3,
         shearAmp: 8,
         shearFreq: 1 / 330,
-        detailAmp: 3.4,
-        detailFreq: 1 / 17,
-        damping: 0.8,
-        ridgeAmp: 18,
-        ridgeFreq: 1 / 180,
-        outcropAmp: 9,
-        outcropFreq: 1 / 285,
-        outcropThreshold: 0.48,
-        channelDepth: 12,
-        channelFreq: 1 / 385,
+        // High-frequency fracture over a low-frequency base, per the spec.
+        detailAmp: 6,
+        detailFreq: 1 / 12,
+        damping: 0.6,
+        // Ridged levees are the dominant landform here, not the dunes.
+        ridgeAmp: 26,
+        ridgeFreq: 1 / 140,
+        outcropAmp: 14,
+        outcropFreq: 1 / 80,
+        outcropThreshold: 0.34,
+        channelDepth: 18,
+        channelFreq: 1 / 260,
     },
     substrate: {
         cohesion: 0.008,
