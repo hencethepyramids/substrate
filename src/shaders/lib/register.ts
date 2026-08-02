@@ -3,6 +3,7 @@ import noise from "./noise.wgsl?raw";
 import heightfield from "./heightfield.wgsl?raw";
 import pack from "./pack.wgsl?raw";
 import terrainField from "./terrainField.wgsl?raw";
+import terrainParams from "./terrainParams.wgsl?raw";
 import atmosphere from "./atmosphere.wgsl?raw";
 import sh from "./sh.wgsl?raw";
 import skyMap from "./skyMap.wgsl?raw";
@@ -33,6 +34,7 @@ export function registerShaderIncludes(): void {
     store["substrateHeightfield"] = heightfield;
     store["substratePack"] = pack;
     store["substrateTerrainField"] = terrainField;
+    store["substrateTerrainParams"] = terrainParams;
     store["substrateAtmosphere"] = atmosphere;
     store["substrateSh"] = sh;
     store["substrateSkyMap"] = skyMap;

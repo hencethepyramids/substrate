@@ -33,15 +33,27 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 }`;
 
 /**
- * Asks the GPU what it thinks the ground height is, through the exact include the
- * terrain vertex shader uses, so the CPU mirror can be checked against it.
+ * The verification probe. Reports three numbers per texel, which between them pin
+ * down every orientation question this file has:
+ *
+ *   r  what the GPU reads out of the BAKED FIELD, through the exact include the
+ *      terrain vertex shader uses
+ *   g  what sbTerrainD says at the same place, evaluated directly
+ *   b  the world coordinate it was taken at
+ *
+ * r vs g scores the bake's own orientation — the invariant that the field IS the
+ * function, which nothing checked before and which Phase 2's far-range raymarch
+ * depends on absolutely. r vs the CPU mirror scores grounding. And carrying the
+ * coordinate in b means matching texels to world positions needs no assumption
+ * about which way readPixels orders its rows.
  *
  * Samples an oblique line (z = 0.37x) so that a whole-field Z flip changes the
- * answer — along an axis-aligned line it would not. Each texel reports the height AND
- * the coordinate it was taken at, so matching texels to world positions needs no
- * assumption about which way readPixels orders its rows.
+ * answer — along an axis-aligned line it would not.
  */
 const VERIFY_SOURCE = `
+#include<substrateNoise>
+#include<substrateHeightfield>
+#include<substrateTerrainParams>
 #include<substratePack>
 #include<substrateTerrainField>
 varying vUV: vec2f;
@@ -50,9 +62,14 @@ uniform vfExtent: f32;
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
     let t = uniforms.vfOrigin + input.vUV.x * uniforms.vfExtent;
-    let h = sbSampleField(vec2f(t, t * 0.37));
-    fragmentOutputs.color = vec4f(h.x, t, 0.0, 1.0);
+    let p = vec2f(t, t * 0.37);
+    let baked = sbSampleField(p);
+    let truth = sbTerrainD(p, sbTerrainParams());
+    fragmentOutputs.color = vec4f(baked.x, truth.x, t, 1.0);
 }`;
+
+/** Texels across the probe. */
+const PROBE_WIDTH = 64;
 
 export class Heightfield {
     readonly size = FIELD_SIZE;
@@ -115,11 +132,17 @@ export class Heightfield {
     async bake(element: ElementDef, report?: (fraction: number) => void): Promise<void> {
         this._baking = true;
         try {
-            this._pushUniforms(element);
+            this._pushUniforms(this.texture, element);
 
             for (let guard = 0; guard < 600 && !this.texture.isReady(); guard++) {
                 await nextFrame();
             }
+
+            if (!this._bakeFlipResolved) {
+                await this._resolveBakeOrientation(element);
+                this._bakeFlipResolved = true;
+            }
+            this.texture.setFloat("bkFlipV", this._bakeFlipV);
             this.texture.render();
             report?.(0.08);
 
@@ -131,13 +154,15 @@ export class Heightfield {
 
             await this._refreshMirror(report);
             this._mirrorValid = true;
-            await this._verifyMirror();
+            await this._verifyMirror(element);
         } finally {
             this._baking = false;
         }
     }
 
     private _flipDetected = false;
+    private _bakeFlipResolved = false;
+    private _bakeFlipV = 0;
 
     /** Height in metres, matching sbSampleField in the shared include. */
     sampleHeight(x: number, z: number): number {
@@ -212,15 +237,16 @@ export class Heightfield {
     }
 
     dispose(): void {
+        this._probe?.dispose();
+        this._probe = null;
         this.texture.dispose();
     }
 
     // -- internals -----------------------------------------------------------
 
-    private _pushUniforms(element: ElementDef): void {
+    private _pushUniforms(tex: ProceduralTexture, element: ElementDef): void {
         const t = element.terrain;
         const bearing = this._settings.v["world.windBearing"] * (Math.PI / 180);
-        const tex = this.texture;
 
         tex.setVector2("bkOrigin", this._origin);
         tex.setFloat("bkExtent", FIELD_EXTENT);
@@ -293,6 +319,82 @@ export class Heightfield {
     }
 
     /**
+     * Render the probe and read it back. Created once and kept — the orientation
+     * resolve alone runs it twice.
+     */
+    private async _readProbe(element: ElementDef): Promise<Float32Array | null> {
+        if (this._probe === null) {
+            this._probe = new ProceduralTexture(
+                "terrainFieldVerify",
+                { width: PROBE_WIDTH, height: 1 },
+                { fragmentSource: VERIFY_SOURCE },
+                this._scene,
+                {
+                    shaderLanguage: ShaderLanguage.WGSL,
+                    format: Constants.TEXTUREFORMAT_RGBA,
+                    type: Constants.TEXTURETYPE_FLOAT,
+                    samplingMode: Constants.TEXTURE_NEAREST_SAMPLINGMODE,
+                    generateMipMaps: false,
+                    skipSceneRegistration: true,
+                },
+            );
+            this._probe.refreshRate = 0;
+            this._probe.setTexture("sbFieldTex", this.texture);
+            this._probe.setVector2("sbFieldOrigin", this._origin);
+            this._probe.setFloat("sbFieldExtent", FIELD_EXTENT);
+            this._probe.setFloat("sbFieldSize", FIELD_SIZE);
+            // Compare unscaled, so the height slider cannot skew the verdict.
+            this._probe.setFloat("sbHeightScale", 1);
+            this._probe.setFloat("vfOrigin", this.originX);
+            this._probe.setFloat("vfExtent", FIELD_EXTENT);
+        }
+
+        const probe = this._probe;
+        this._pushUniforms(probe, element);
+
+        for (let guard = 0; guard < 600 && !probe.isReady(); guard++) {
+            await nextFrame();
+        }
+        probe.render();
+        return (await probe.readPixels(0, 0, null, true, false, 0, 0, PROBE_WIDTH, 1)) as Float32Array | null;
+    }
+
+    /**
+     * Decide which way the bake's v axis runs, by measuring the baked field against
+     * sbTerrainD itself.
+     *
+     * This is the invariant nothing checked before: the field IS the function. Get
+     * the flip wrong and the whole field is mirrored in Z, which is undetectable by
+     * looking — mirrored noise is still noise, the terrain renders perfectly, and
+     * the CPU mirror happily re-verifies itself against the wrong surface. It only
+     * surfaces in Phase 2's far-range raymarch, which evaluates sbTerrainD directly
+     * and would disagree with the clipmap about where the hills are.
+     */
+    private async _resolveBakeOrientation(element: ElementDef): Promise<void> {
+        const scores = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+        for (let flip = 0; flip < 2; flip++) {
+            this.texture.setFloat("bkFlipV", flip);
+            this.texture.render();
+            const data = await this._readProbe(element);
+            if (!data) {
+                console.warn("[substrate] bake orientation check skipped: no probe data");
+                this._bakeFlipV = 0;
+                return;
+            }
+            scores[flip] = fieldVsFunctionError(data);
+        }
+
+        this._bakeFlipV = scores[1] < scores[0] ? 1 : 0;
+
+        const best = Math.min(scores[0], scores[1]);
+        const worst = Math.max(scores[0], scores[1]);
+        console.info(`[substrate] heightfield bake orientation: ${this._bakeFlipV === 0 ? "as written" : "FLIPPED to match the target"} (error ${best.toFixed(4)} m, other orientation ${worst.toFixed(2)} m)`);
+        if (best > 0.05) {
+            console.warn(`[substrate] baked field still disagrees with sbTerrainD by ${best.toFixed(3)} m — anything that evaluates the function directly will not match the clipmap`);
+        }
+    }
+
+    /**
      * Check the CPU mirror against the surface the GPU actually draws, and flip it if
      * they disagree.
      *
@@ -301,43 +403,14 @@ export class Heightfield {
      * following the right heights from the wrong place. Rather than reason about
      * which way NDC maps to texel rows and be wrong, ask the renderer.
      */
-    private async _verifyMirror(): Promise<void> {
-        const probe = new ProceduralTexture(
-            "terrainFieldVerify",
-            64,
-            { fragmentSource: VERIFY_SOURCE },
-            this._scene,
-            {
-                shaderLanguage: ShaderLanguage.WGSL,
-                format: Constants.TEXTUREFORMAT_RG,
-                type: Constants.TEXTURETYPE_FLOAT,
-                samplingMode: Constants.TEXTURE_NEAREST_SAMPLINGMODE,
-                generateMipMaps: false,
-                skipSceneRegistration: true,
-            },
-        );
-        probe.refreshRate = 0;
+    private async _verifyMirror(element: ElementDef): Promise<void> {
         try {
-            probe.setTexture("sbFieldTex", this.texture);
-            probe.setVector2("sbFieldOrigin", this._origin);
-            probe.setFloat("sbFieldExtent", FIELD_EXTENT);
-            probe.setFloat("sbFieldSize", FIELD_SIZE);
-            // Compare unscaled, so the height slider cannot skew the verdict.
-            probe.setFloat("sbHeightScale", 1);
-            probe.setFloat("vfOrigin", this.originX);
-            probe.setFloat("vfExtent", FIELD_EXTENT);
-
-            for (let guard = 0; guard < 600 && !probe.isReady(); guard++) {
-                await nextFrame();
-            }
-            probe.render();
-
-            const data = (await probe.readPixels(0, 0, null, true, false, 0, 0, 64, 1)) as Float32Array | null;
-            if (!data || data.length < 64) {
+            const data = await this._readProbe(element);
+            if (!data || data.length < PROBE_WIDTH) {
                 console.warn("[substrate] mirror verification skipped: no probe data");
                 return;
             }
-            const components = Math.max(1, Math.round(data.length / 64));
+            const components = Math.max(1, Math.round(data.length / PROBE_WIDTH));
 
             const asRead = this._mirrorError(data, components);
             this._flipMirrorZ();
@@ -352,20 +425,20 @@ export class Heightfield {
             }
         } catch (err) {
             console.warn("[substrate] mirror verification failed:", err);
-        } finally {
-            probe.dispose();
         }
     }
+
+    private _probe: ProceduralTexture | null = null;
 
     /** Mean absolute disagreement, in metres, between the mirror and the GPU probe. */
     private _mirrorError(data: Float32Array, components: number): number {
         let sum = 0;
-        for (let i = 0; i < 64; i++) {
+        for (let i = 0; i < PROBE_WIDTH; i++) {
             const gpuHeight = data[i * components];
-            const t = data[i * components + 1];
+            const t = data[i * components + 2];
             sum += Math.abs(gpuHeight - this._sampleRaw(t, t * 0.37));
         }
-        return sum / 64;
+        return sum / PROBE_WIDTH;
     }
 
     /** Reverse the mirror's row order in place. One pass over 67 MB. */
@@ -412,4 +485,19 @@ export class Heightfield {
 
 function clampInt(v: number, lo: number, hi: number): number {
     return v < lo ? lo : v > hi ? hi : v;
+}
+
+/**
+ * Mean absolute disagreement, in metres, between the baked field and sbTerrainD at
+ * the same world positions. Near zero when the bake's orientation is right; several
+ * metres when the field is mirrored, because the oblique sample line then lands
+ * somewhere else entirely.
+ */
+function fieldVsFunctionError(data: Float32Array): number {
+    const stride = Math.max(1, Math.round(data.length / PROBE_WIDTH));
+    let sum = 0;
+    for (let i = 0; i < PROBE_WIDTH; i++) {
+        sum += Math.abs(data[i * stride] - data[i * stride + 1]);
+    }
+    return sum / PROBE_WIDTH;
 }
