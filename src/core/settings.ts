@@ -49,6 +49,9 @@ export const DEBUG_VIEWS = [
     "off",
     "normals",
     "linearDepth",
+    "terrain.rings",
+    "terrain.morph",
+    "terrain.slope",
     "cascades",
     "shadowMap",
     "substrate.depression",
@@ -97,6 +100,11 @@ export const SCHEMA = {
     "sys.wake": bool({ group: "Systems", label: "Swept wake", def: true }),
     "sys.spray": bool({ group: "Systems", label: "Spray + particles", def: true }),
     "sys.post": bool({ group: "Systems", label: "Post chain", def: true }),
+
+    // -- Terrain -------------------------------------------------------------
+    "terrain.heightScale": num({ group: "Terrain", label: "Height scale", def: 1, min: 0.05, max: 2.5, step: 0.01, hint: "Applied when the field is read, so it is live with no rebake." }),
+    "terrain.morph": bool({ group: "Terrain", label: "CDLOD morphing", def: true, hint: "Turn off to see exactly where the LOD seams are." }),
+    "terrain.followCamera": bool({ group: "Terrain", label: "Clipmap follows camera", def: true, hint: "Freeze to walk out of the clipmap and inspect the rings." }),
 
     // -- Render --------------------------------------------------------------
     "render.resolutionScale": num({ group: "Render", label: "Resolution scale", def: 1, min: 0.5, max: 2, step: 0.05 }),

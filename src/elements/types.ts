@@ -90,11 +90,53 @@ export interface WakeParams {
     airborneFraction: number;
 }
 
+/**
+ * Consumed by the one heightfield function (Phase 1). Every biome is the same
+ * construction — swell, sheared dunes, drifts, ridges, outcrops, channels — with
+ * different numbers. Amplitudes are metres, frequencies are cycles per metre.
+ */
+export interface TerrainDef {
+    /** One long low swell. Single octave: this is the horizon silhouette. */
+    swellAmp: number;
+    swellFreq: number;
+
+    /** Broad dune ridges, stretched across the wind so they read as transverse. */
+    duneAmp: number;
+    duneFreq: number;
+    duneStretch: number;
+    duneOctaves: number;
+
+    /** Domain shear along the wind, in metres of displacement. Makes lee faces steepen. */
+    shearAmp: number;
+    shearFreq: number;
+
+    /** Medium drifts riding on the sheared domain. */
+    detailAmp: number;
+    detailFreq: number;
+    /** Slope damping. Higher = smoother hollows and crisper crests. */
+    damping: number;
+
+    /** Ridged multifractal for volcanic flow levees. Zero elsewhere. */
+    ridgeAmp: number;
+    ridgeFreq: number;
+
+    /** Sparse hard outcrops pushing through the loose material. */
+    outcropAmp: number;
+    outcropFreq: number;
+    /** Noise value above which rock emerges. Higher = sparser. */
+    outcropThreshold: number;
+
+    /** Carved channels for Phase 6's lava. Zero elsewhere. */
+    channelDepth: number;
+    channelFreq: number;
+}
+
 export interface ElementDef {
     id: BiomeId;
     label: string;
     /** Short description shown in the overlay's biome selector. */
     blurb: string;
+    terrain: TerrainDef;
     substrate: SubstrateParams;
     atmosphere: AtmosphereParams;
     surface: SurfaceParams;

@@ -12,17 +12,16 @@ import { GpuTimings } from "./core/gpuTimer";
 import { Input } from "./core/input";
 import { CameraRig } from "./core/cameraRig";
 import { Mover } from "./core/mover";
-import { Phase0World } from "./core/phase0World";
+import { Environment } from "./render/environment";
+import { Terrain } from "./terrain/terrain";
+import { PlaceholderCharacter } from "./character/placeholder";
+import { registerShaderIncludes } from "./shaders/lib/register";
 import { Overlay } from "./ui/overlay";
 import { BIOME_IDS } from "./elements/registry";
 import type { BiomeId } from "./elements/types";
 
 /**
  * SUBSTRATE — entry point and frame orchestration.
- *
- * Phase 0: harness only. Everything below is structured so that later phases hang
- * their systems off the existing timing sections and settings, rather than
- * restructuring the loop.
  *
  * Rule 1: nothing in frame() allocates. Every object it touches is constructed here,
  * during boot, behind the loading screen.
@@ -39,9 +38,12 @@ async function boot(): Promise<void> {
         return;
     }
 
+    registerShaderIncludes();
+
     const settings = new Settings();
     const biome = new BiomeState(settings);
     const perf = new Perf(512);
+    const env = new Environment();
     const loader = new LoadingScreen(stage);
 
     let engine!: WebGPUEngine;
@@ -49,7 +51,8 @@ async function boot(): Promise<void> {
     let gpu!: GpuTimings;
     let input!: Input;
     let rig!: CameraRig;
-    let world!: Phase0World;
+    let terrain!: Terrain;
+    let character!: PlaceholderCharacter;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
 
@@ -65,48 +68,49 @@ async function boot(): Promise<void> {
         scene.clearColor = new Color4(0, 0, 0, 1);
         scene.autoClear = true;
         // No Babylon lights: all shading is in our own WGSL.
-        scene.skipFrustumClipping = false;
         gpu = new GpuTimings(engine, settings, capability.has("timestamp-query"));
         input = new Input(canvas);
         rig = new CameraRig(scene, settings);
     });
 
-    loader.add("world", 2, () => {
-        world = new Phase0World(scene, settings, biome);
-        world.setCharacterPose(mover.position, mover.facing);
-        world.update(rig.camera);
+    loader.add("clipmap mesh", 2, () => {
+        terrain = new Terrain(scene, settings, biome);
+        character = new PlaceholderCharacter(scene, settings);
+        console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
+    });
+
+    // The heightfield bake plus the 67 MB readback that mirrors it to the CPU. This is
+    // the long pole at load, so it reports real sub-progress.
+    loader.add("baking heightfield", 12, async (report) => {
+        await terrain.prepare(report);
     });
 
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
-    loader.add("compiling pipelines", 6, async (report) => {
-        const materials = world.materials;
-        for (let i = 0; i < materials.length; i++) {
-            await materials[i].forceCompilationAsync(world.meshes[i]);
-            report((i + 1) / (materials.length + 1));
-        }
+    loader.add("compiling pipelines", 5, async (report) => {
+        await character.material.forceCompilationAsync(character.mesh);
+        report(0.5);
+
+        mover.teleport(0, 0);
+        mover.position.y = terrain.field.sampleHeight(0, 0);
+        rig.snap();
+
         // Compilation is not the whole story on WebGPU — the render pipeline state
-        // object is only built on first draw. Draw real frames until everything reports
-        // ready so the first visible frame cannot stall.
-        for (let attempt = 0; attempt < 120; attempt++) {
+        // object is only built on first draw. Draw real frames until everything
+        // reports ready so the first visible frame cannot stall.
+        for (let attempt = 0; attempt < 180; attempt++) {
+            env.update(settings, biome.current, scene);
+            terrain.update(rig.camera, env);
+            character.update(rig.camera, env);
             scene.render();
-            if (world.isReady() && scene.isReady()) break;
+            if (terrain.ready && character.isReady() && scene.isReady()) break;
             await nextFrame();
         }
         report(1);
     });
 
     loader.add("overlay", 1, () => {
-        overlay = new Overlay({
-            root: stage,
-            settings,
-            perf,
-            gpu,
-            scene,
-            input,
-            biome,
-            capability,
-        });
-        registerActions(overlay, settings, mover, rig);
+        overlay = new Overlay({ root: stage, settings, perf, gpu, scene, input, biome, capability });
+        registerActions(overlay, settings, mover, rig, terrain);
     });
 
     try {
@@ -123,6 +127,7 @@ async function boot(): Promise<void> {
 
     const S_INPUT = perf.section("input");
     const S_SIM = perf.section("locomotion");
+    const S_GROUND = perf.section("grounding");
     const S_CAMERA = perf.section("camera");
     const S_UNIFORMS = perf.section("uniforms");
     const S_RENDER = perf.section("render submit");
@@ -150,8 +155,15 @@ async function boot(): Promise<void> {
 
         perf.begin(S_SIM);
         mover.update(input, rig, simDt);
-        world.setCharacterPose(mover.position, mover.facing);
         perf.end(S_SIM);
+
+        perf.begin(S_GROUND);
+        // Stand on the surface that is drawn, sampled through the CPU mirror of the
+        // same bilinear filter the vertex shader uses. Phase 7 replaces this with
+        // per-foot contact against the same field.
+        mover.position.y = terrain.field.sampleHeight(mover.position.x, mover.position.z);
+        character.setPose(mover.position, mover.facing);
+        perf.end(S_GROUND);
 
         perf.begin(S_CAMERA);
         // The rig uses real time, not simulation time — pausing must not freeze the camera.
@@ -159,9 +171,9 @@ async function boot(): Promise<void> {
         perf.end(S_CAMERA);
 
         perf.begin(S_UNIFORMS);
-        // The world owns the clear colour too — it is the same sky the fog mixes toward,
-        // and two owners is how the horizon seam got in.
-        world.update(rig.camera);
+        env.update(settings, biome.current, scene);
+        terrain.update(rig.camera, env);
+        character.update(rig.camera, env);
         perf.end(S_UNIFORMS);
 
         perf.begin(S_RENDER);
@@ -180,12 +192,11 @@ async function boot(): Promise<void> {
 
     engine.runRenderLoop(frame);
 
-    // Held for teardown symmetry; nothing calls this yet, but every system that
-    // allocates GPU memory must be reachable from one place when it does.
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
         overlay.dispose();
-        world.dispose();
+        terrain.dispose();
+        character.dispose();
         input.dispose();
         unbindEngine();
         scene.dispose();
@@ -194,7 +205,7 @@ async function boot(): Promise<void> {
 }
 
 /** Overlay buttons. Phase 10's element interactions register here too. */
-function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig): void {
+function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, terrain: Terrain): void {
     overlay.addAction("cycle biome", () => {
         const current = settings.get("world.biome") as BiomeId;
         const next = BIOME_IDS[(BIOME_IDS.indexOf(current) + 1) % BIOME_IDS.length];
@@ -202,6 +213,13 @@ function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig
     });
     overlay.addAction("origin", () => {
         mover.teleport(0, 0);
+        mover.position.y = terrain.field.sampleHeight(0, 0);
+        rig.snap();
+    });
+    overlay.addAction("walk 800m", () => {
+        // The Phase 1 acceptance test, as one click.
+        mover.teleport(800, 0);
+        mover.position.y = terrain.field.sampleHeight(800, 0);
         rig.snap();
     });
     overlay.addAction("noon", () => settings.set("world.sunElevation", 68));

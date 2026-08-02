@@ -28,12 +28,12 @@ error should be two distinct red steps, not one ambiguous failure.
 
 ---
 
-## Status: Phase 0 (harness) complete
+## Status: Phase 1 (terrain) complete
 
 | Phase | State |
 | --- | --- |
 | 0 — harness | done |
-| 1 — terrain | not started |
+| 1 — terrain | done |
 | 2 — sky, lighting, atmosphere | not started |
 | 3 — substrate buffer | not started |
 | 4 — surface materials | not started |
@@ -67,6 +67,27 @@ error should be two distinct red steps, not one ambiguous failure.
   parameter blocks in [src/elements/registry.ts](src/elements/registry.ts) and the
   switch takes effect live — albedo, ambient, ground bounce, haze and sky all move
   without a reload.
+
+### Phase 1 acceptance
+
+> Walk 800 m in any direction, no LOD popping, terrain draw count is exactly 1.
+
+- **One draw call.** An 8-level nested ring clipmap: 160 cells per side, 8.5 cm at
+  level 0, 870.4 m radius, **324,424 triangles in one static mesh**. Vertices carry
+  `(gridIndex.x, ringLevel, gridIndex.z)` and nothing else — 2 MB, uploaded once,
+  never touched again. World placement, per-level snapping, CDLOD morphing and
+  displacement all happen in the vertex shader.
+- **Analytic derivatives, not finite differences.** [noise.wgsl](src/shaders/lib/noise.wgsl)
+  carries exact derivatives through every octave, every domain transform and every
+  Jacobian. That is what allows the fBm to *damp its own detail by slope*, which is
+  the single largest contributor to the result reading as landform rather than as
+  noise, and it gives normals for free.
+- **One heightfield function.** [heightfield.wgsl](src/shaders/lib/heightfield.wgsl)
+  is the same construction for all three biomes — swell, wind-sheared dunes, drifts,
+  ridged levees, outcrops, channels — differing only by the `TerrainDef` numbers in
+  [registry.ts](src/elements/registry.ts). No branch on biome anywhere.
+- **Baked once** into a 4096² RG32F field over 2048 m (0.5 m/texel), and **mirrored
+  to the CPU** so grounding stands on the surface that is drawn.
 
 ### Controls
 
@@ -102,6 +123,21 @@ target changes.
 [src/main.ts](src/main.ts) allocates nothing. Percentiles sort into a preallocated
 scratch buffer at overlay rate; the overlay reuses its row elements and only writes
 `textContent`; uniform pushes mutate preallocated vectors.
+
+**Rule 4 has a home.** [terrainField.wgsl](src/shaders/lib/terrainField.wgsl) is the
+single definition of "where is the ground". The beauty pass includes it today and
+every Phase 2 shadow cascade will include the same file. It uses explicit bilinear
+over `textureLoad` rather than a filtered sample for two reasons: it removes any
+dependence on the `float32-filterable` feature, and it is reproducible on the CPU,
+which is what lets character grounding be *exact* rather than close.
+
+**Two decisions worth knowing about.** Each clipmap ring's hole is built one cell
+*smaller* than the level it wraps: a level snapped to twice its own spacing sits
+either exactly on its child's centre or one cell off it, and sizing the hole small
+turns that ambiguity into a harmless 1–2 cell overlap instead of a hole in the
+ground. And the packed derivative is a 24-bit integer, not `pack2x16float` — bitcast
+packing produces denormals and NaNs, which a float32 render target is permitted to
+flush.
 
 **Rule 7 is real.** `GpuTimings` registers *providers*, not counter references,
 because Babylon swaps the counter object out whenever timing is toggled — a cached
