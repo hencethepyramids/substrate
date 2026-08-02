@@ -20,6 +20,8 @@ export const DEBUG_CODES: Record<string, number> = {
     "terrain.slope": 5,
     "sky.irradiance": 6,
     "sky.aerial": 7,
+    cascades: 8,
+    shadowMap: 9,
 };
 
 export function debugCode(view: string): number {

@@ -13,6 +13,7 @@ import { Input } from "./core/input";
 import { CameraRig } from "./core/cameraRig";
 import { Mover } from "./core/mover";
 import { Sky } from "./render/sky";
+import { Shadows } from "./render/shadows";
 import { Terrain } from "./terrain/terrain";
 import { PlaceholderCharacter } from "./character/placeholder";
 import { registerShaderIncludes } from "./shaders/lib/register";
@@ -51,6 +52,7 @@ async function boot(): Promise<void> {
     let input!: Input;
     let rig!: CameraRig;
     let sky!: Sky;
+    let shadows!: Shadows;
     let terrain!: Terrain;
     let character!: PlaceholderCharacter;
     let overlay!: Overlay;
@@ -74,10 +76,13 @@ async function boot(): Promise<void> {
     });
 
     loader.add("clipmap mesh", 2, () => {
-        // Sky first: terrain and the character bind its LUTs at construction.
+        // Sky and shadows first: terrain and the character bind their textures at
+        // construction. Shadows learns which meshes cast once those exist.
         sky = new Sky(scene, settings, biome);
-        terrain = new Terrain(scene, settings, biome, sky);
-        character = new PlaceholderCharacter(scene, settings, sky);
+        shadows = new Shadows(scene, settings, sky);
+        terrain = new Terrain(scene, settings, biome, sky, shadows);
+        character = new PlaceholderCharacter(scene, settings, sky, shadows);
+        shadows.setCasters(terrain.mesh, [character.mesh]);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
     });
 
@@ -97,6 +102,8 @@ async function boot(): Promise<void> {
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
     loader.add("compiling pipelines", 5, async (report) => {
         const characterOk = await compileOrWarn("character", () => character.material.forceCompilationAsync(character.mesh));
+        report(0.3);
+        await shadows.prepare();
         report(0.5);
 
         mover.teleport(0, 0);
@@ -110,8 +117,9 @@ async function boot(): Promise<void> {
             sky.update(rig.camera);
             terrain.update(rig.camera);
             character.update(rig.camera);
+            shadows.update(rig.camera);
             scene.render();
-            if (terrain.ready && sky.ready && character.isReady() && scene.isReady()) break;
+            if (terrain.ready && sky.ready && shadows.ready && character.isReady() && scene.isReady()) break;
             await nextFrame();
         }
 
@@ -120,6 +128,7 @@ async function boot(): Promise<void> {
         console.info(
             `[substrate] boot: terrain material ${terrain.compiled ? "ok" : "FAILED"}, ` +
                 `sky ${sky.compiled ? "ok" : "FAILED"}, ` +
+                `shadow cast ${shadows.compiled ? "ok" : "FAILED"}, ` +
                 `character material ${characterOk ? "ok" : "FAILED"}, ` +
                 `height mirror ${terrain.field.mirrorValid ? "ok" : "FAILED"}, ` +
                 `ground at origin ${terrain.field.sampleHeight(0, 0).toFixed(2)} m`,
@@ -130,6 +139,9 @@ async function boot(): Promise<void> {
     loader.add("overlay", 1, () => {
         overlay = new Overlay({ root: stage, settings, perf, gpu, scene, input, biome, capability });
         overlay.addCounter("sky bakes", () => String(sky.bakes));
+        // Rule 7: register a provider, not a counter. The wrapper is swapped out
+        // whenever the atlas is resized, so a cached reference would go stale.
+        gpu.register("shadow cascades", () => shadows.gpuTime);
         registerActions(overlay, settings, mover, rig, terrain);
     });
 
@@ -150,6 +162,7 @@ async function boot(): Promise<void> {
     const S_GROUND = perf.section("grounding");
     const S_CAMERA = perf.section("camera");
     const S_SKY = perf.section("sky");
+    const S_SHADOWS = perf.section("shadow cascades");
     const S_UNIFORMS = perf.section("uniforms");
     const S_RENDER = perf.section("render submit");
     const S_OVERLAY = perf.section("overlay");
@@ -204,6 +217,12 @@ async function boot(): Promise<void> {
         character.update(rig.camera);
         perf.end(S_UNIFORMS);
 
+        // After the uniforms the cast materials share with the beauty pass, before
+        // scene.render(): the atlas has to be written before anything samples it.
+        perf.begin(S_SHADOWS);
+        shadows.update(rig.camera);
+        perf.end(S_SHADOWS);
+
         perf.begin(S_RENDER);
         scene.render();
         perf.end(S_RENDER);
@@ -225,6 +244,7 @@ async function boot(): Promise<void> {
         overlay.dispose();
         terrain.dispose();
         character.dispose();
+        shadows.dispose();
         sky.dispose();
         input.dispose();
         unbindEngine();

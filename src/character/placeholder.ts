@@ -8,6 +8,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Settings } from "../core/settings";
 import { Sky, SKY_UNIFORMS, SKY_SAMPLERS, WORLD_GROUP } from "../render/sky";
+import { Shadows, SHADOW_UNIFORMS, SHADOW_SAMPLERS } from "../render/shadows";
 import vertexSource from "../shaders/phase0.vertex.wgsl?raw";
 import fragmentSource from "../shaders/phase0.fragment.wgsl?raw";
 
@@ -28,12 +29,14 @@ export class PlaceholderCharacter {
 
     private readonly _settings: Settings;
     private readonly _sky: Sky;
+    private readonly _shadows: Shadows;
     private readonly _params = new Vector4(1, 0, 0, 0);
     private readonly _albedo = new Color3(0.62, 0.24, 0.14);
 
-    constructor(scene: Scene, settings: Settings, sky: Sky) {
+    constructor(scene: Scene, settings: Settings, sky: Sky, shadows: Shadows) {
         this._settings = settings;
         this._sky = sky;
+        this._shadows = shadows;
 
         this.material = new ShaderMaterial(
             "placeholderCharacter",
@@ -41,12 +44,13 @@ export class PlaceholderCharacter {
             { vertexSource, fragmentSource },
             {
                 attributes: ["position", "normal"],
-                uniforms: ["world", "viewProjection", "baseColor", "lineColor", "cameraPos", "params", ...SKY_UNIFORMS],
-                samplers: [...SKY_SAMPLERS],
+                uniforms: ["world", "viewProjection", "baseColor", "lineColor", "cameraPos", "params", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS],
+                samplers: [...SKY_SAMPLERS, ...SHADOW_SAMPLERS],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
         );
         sky.bindTo(this.material);
+        shadows.bindTo(this.material);
 
         this.mesh = CreateCapsule("placeholderCharacter", { height: HEIGHT, radius: RADIUS, tessellation: 20, subdivisions: 1 }, scene);
         this.mesh.material = this.material;
@@ -73,6 +77,7 @@ export class PlaceholderCharacter {
         m.setVector3("cameraPos", camera.globalPosition);
         m.setVector4("params", this._params);
         this._sky.pushTo(m);
+        this._shadows.pushTo(m);
     }
 
     isReady(): boolean {

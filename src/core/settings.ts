@@ -126,6 +126,18 @@ export const SCHEMA = {
     "sky.skyVisibility": num({ group: "Sky", label: "Sky visibility", def: 0.88, min: 0.2, max: 1, step: 0.01, advanced: true, hint: "Fraction of the sky an average ground point sees. Drives the bounce solve." }),
     "sky.steps": num({ group: "Sky", label: "LUT raymarch steps", def: 24, min: 8, max: 64, step: 1, advanced: true, hint: "Per direction, in the sky-view bake. Costs nothing per frame — only per rebake." }),
 
+    // -- Shadows -------------------------------------------------------------
+    "shadow.resolution": num({ group: "Shadows", label: "Cascade resolution", def: 2048, min: 512, max: 4096, step: 512, hint: "Per cascade. The atlas is three of these wide." }),
+    "shadow.distance": num({ group: "Shadows", label: "Shadow distance", def: 320, min: 50, max: 1000, step: 10, unit: "m", hint: "Past this the sun is unoccluded. The clipmap still draws to 870 m." }),
+    "shadow.softness": num({ group: "Shadows", label: "Softness", def: 1, min: 0, max: 3, step: 0.05, hint: "Scales the PCSS penumbra. 0 gives hard shadows at one texel." }),
+    "shadow.lightSize": num({ group: "Shadows", label: "Sun angular size", def: 0.012, min: 0, max: 0.1, step: 0.001, hint: "As a fraction of a cascade. The real sun is about half a degree, which is very small — this is a look control." }),
+    "shadow.blend": num({ group: "Shadows", label: "Cascade blend", def: 6, min: 0, max: 30, step: 0.5, unit: "m", advanced: true, hint: "Cross-fade band at each cascade edge." }),
+    "shadow.bias": num({ group: "Shadows", label: "Depth bias", def: 0.0012, min: 0, max: 0.01, step: 0.0001, advanced: true }),
+    "shadow.normalBias": num({ group: "Shadows", label: "Normal offset", def: 1.5, min: 0, max: 8, step: 0.1, unit: "texels", advanced: true, hint: "Offsets the lookup along the normal instead of biasing depth. This is what keeps steep slopes free of acne." }),
+    "shadow.pcfTaps": num({ group: "Shadows", label: "PCF taps", def: 16, min: 4, max: 64, step: 4, advanced: true }),
+    "shadow.blockerTaps": num({ group: "Shadows", label: "Blocker search taps", def: 12, min: 4, max: 32, step: 4, advanced: true }),
+    "shadow.depthRange": num({ group: "Shadows", label: "Caster depth range", def: 200, min: 20, max: 800, step: 10, unit: "m", advanced: true, hint: "How far above a cascade a caster can be and still be included." }),
+
     // -- Render --------------------------------------------------------------
     "render.resolutionScale": num({ group: "Render", label: "Resolution scale", def: 1, min: 0.5, max: 2, step: 0.05 }),
     "render.fpsCap": num({ group: "Render", label: "FPS cap", def: 0, min: 0, max: 360, step: 10, hint: "0 = uncapped." }),

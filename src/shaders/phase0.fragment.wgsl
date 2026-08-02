@@ -9,6 +9,7 @@
 #include<substrateSkyLut>
 #include<substrateSh>
 #include<substrateSkyData>
+#include<substrateShadow>
 
 varying vWorld: vec3f;
 varying vNormal: vec3f;
@@ -37,8 +38,9 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let l = normalize(uniforms.sbSunDir);
 
     // Wrapped diffuse. The real one arrives in Phase 4 with the subsurface term.
+    let rawNdl = dot(n, l);
     let wrap = 0.35;
-    let ndl = clamp((dot(n, l) + wrap) / (1.0 + wrap), 0.0, 1.0);
+    let ndl = clamp((rawNdl + wrap) / (1.0 + wrap), 0.0, 1.0);
 
     var albedo = uniforms.baseColor;
     if (uniforms.params.x < 0.5) {
@@ -47,11 +49,15 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         albedo = mix(albedo, uniforms.lineColor, clamp(fine + coarse, 0.0, 1.0));
     }
 
-    var color = albedo * (sbSunDiffuse() * ndl + sbShIrradiance(n));
-
     let toEye = input.vWorld - uniforms.cameraPos;
     let dist = length(toEye);
     let viewDir = toEye / max(dist, 1e-4);
+
+    // Same shadow term as the terrain, from the same include. A character lit by a
+    // different sun than the ground it stands on is the tell that two paths exist.
+    let shadow = shVisibility(input.vWorld, n, rawNdl, dist);
+    var color = albedo * (sbSunDiffuse() * ndl * shadow + sbShIrradiance(n));
+
     let transmittance = sbAerial(dist * 0.001);
     color = color * transmittance + sbHazeColor(viewDir) * (vec3f(1.0) - transmittance);
 

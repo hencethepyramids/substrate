@@ -9,6 +9,7 @@ import type { Settings } from "../core/settings";
 import type { BiomeState } from "../core/biome";
 import type { ElementDef } from "../elements/types";
 import { Sky, SKY_UNIFORMS, SKY_SAMPLERS, WORLD_GROUP } from "../render/sky";
+import { Shadows, SHADOW_UNIFORMS, SHADOW_SAMPLERS } from "../render/shadows";
 import { debugCode } from "../render/debugViews";
 import { Heightfield } from "./heightfield";
 import { buildClipmapMesh, CLIPMAP, type ClipmapStats } from "./clipmapMesh";
@@ -22,7 +23,7 @@ import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
 
 const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
 
-const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoSteep", "fParams", ...SKY_UNIFORMS];
+const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoSteep", "fParams", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS];
 
 export class Terrain {
     readonly field: Heightfield;
@@ -33,6 +34,7 @@ export class Terrain {
     private readonly _settings: Settings;
     private readonly _biome: BiomeState;
     private readonly _sky: Sky;
+    private readonly _shadows: Shadows;
     private readonly _disposers: (() => void)[] = [];
 
     private readonly _center = new Vector2(0, 0);
@@ -43,10 +45,11 @@ export class Terrain {
     private _element: ElementDef;
     private _rebakeQueued = false;
 
-    constructor(scene: Scene, settings: Settings, biome: BiomeState, sky: Sky) {
+    constructor(scene: Scene, settings: Settings, biome: BiomeState, sky: Sky, shadows: Shadows) {
         this._settings = settings;
         this._biome = biome;
         this._sky = sky;
+        this._shadows = shadows;
         this._element = biome.current;
 
         this.field = new Heightfield(scene, settings);
@@ -62,7 +65,7 @@ export class Terrain {
             {
                 attributes: ["position"],
                 uniforms: [...VERTEX_UNIFORMS, ...FRAGMENT_UNIFORMS],
-                samplers: ["sbFieldTex", ...SKY_SAMPLERS],
+                samplers: ["sbFieldTex", ...SKY_SAMPLERS, ...SHADOW_SAMPLERS],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
         );
@@ -73,6 +76,9 @@ export class Terrain {
         this.material.backFaceCulling = false;
         this.material.setTexture("sbFieldTex", this.field.texture);
         sky.bindTo(this.material);
+        shadows.bindTo(this.material);
+        // The cascades displace through the same field, so they need it bound too.
+        shadows.bindField(this.field.texture);
         this.mesh.material = this.material;
         // Over the sky, which draws first and writes no depth.
         this.mesh.renderingGroupId = WORLD_GROUP;
@@ -125,21 +131,18 @@ export class Terrain {
         if (s["terrain.followCamera"]) this._center.set(camPos.x, camPos.z);
 
         const m = this.material;
-        m.setVector2("tCenter", this._center);
-        m.setFloat("tInnerSpacing", CLIPMAP.innerSpacing);
-        m.setFloat("tCells", CLIPMAP.cells);
-        m.setFloat("tMorph", s["terrain.morph"] ? 1 : 0);
-        m.setFloat("tLevels", CLIPMAP.levels);
-
-        m.setVector2("sbFieldOrigin", this._fieldOrigin);
-        m.setFloat("sbFieldExtent", this.field.extent);
-        m.setFloat("sbFieldSize", this.field.size);
-        m.setFloat("sbHeightScale", s["terrain.heightScale"]);
+        // RULE 4, THE OTHER HALF OF IT. substrateClipmap guarantees the beauty pass
+        // and the cascades run the same lines; this guarantees they run them on the
+        // same NUMBERS. A shadow map built from a clipmap centred one frame behind
+        // the shaded one produces creeping stripes that look exactly like bad bias.
+        this._pushClipmap(m);
+        this._pushClipmap(this._shadows.terrainCast);
 
         m.setVector3("fCameraPos", camPos);
         m.setColor3("fAlbedo", this._albedo);
         m.setColor3("fAlbedoSteep", this._albedoSteep);
         this._sky.pushTo(m);
+        this._shadows.pushTo(m);
 
         this._params.set(s["render.exposure"], debugCode(s["debug.view"]), CLIPMAP.levels, 0);
         m.setVector4("fParams", this._params);
@@ -151,6 +154,21 @@ export class Terrain {
         this.mesh.dispose();
         this.material.dispose();
         this.field.dispose();
+    }
+
+    /** The clipmap and field uniforms, shared by the beauty pass and the cascades. */
+    private _pushClipmap(m: ShaderMaterial): void {
+        const s = this._settings.v;
+        m.setVector2("tCenter", this._center);
+        m.setFloat("tInnerSpacing", CLIPMAP.innerSpacing);
+        m.setFloat("tCells", CLIPMAP.cells);
+        m.setFloat("tMorph", s["terrain.morph"] ? 1 : 0);
+        m.setFloat("tLevels", CLIPMAP.levels);
+
+        m.setVector2("sbFieldOrigin", this._fieldOrigin);
+        m.setFloat("sbFieldExtent", this.field.extent);
+        m.setFloat("sbFieldSize", this.field.size);
+        m.setFloat("sbHeightScale", s["terrain.heightScale"]);
     }
 
     private _applyElement(def: ElementDef): void {

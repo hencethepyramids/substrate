@@ -12,6 +12,7 @@
 #include<substrateSkyLut>
 #include<substrateSh>
 #include<substrateSkyData>
+#include<substrateShadow>
 
 varying vWorld: vec3f;
 varying vDeriv: vec2f;
@@ -30,6 +31,8 @@ const SB_DEBUG_DEPTH: f32 = 4.0;
 const SB_DEBUG_SLOPE: f32 = 5.0;
 const SB_DEBUG_SKY_IRRADIANCE: f32 = 6.0;
 const SB_DEBUG_AERIAL: f32 = 7.0;
+const SB_DEBUG_CASCADES: f32 = 8.0;
+const SB_DEBUG_SHADOW_MAP: f32 = 9.0;
 
 fn sbHue(t: f32) -> vec3f {
     return 0.5 + 0.5 * cos(6.2831853 * (t + vec3f(0.0, 0.33, 0.67)));
@@ -52,6 +55,13 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 
     let debug = uniforms.fParams.y;
     let exposure = uniforms.fParams.x;
+
+    let l = normalize(uniforms.sbSunDir);
+    let rawNdl = dot(n, l);
+    // Sun visibility. Computed once, outside the debug chain, so `cascades` and
+    // `shadowMap` show exactly what the beauty path is using rather than a second
+    // evaluation that could differ.
+    let shadow = shVisibility(input.vWorld, n, rawNdl, dist);
 
     // Distances are metres here and kilometres in the atmosphere model.
     let transmittance = sbAerial(dist * 0.001);
@@ -81,6 +91,15 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // The SH term alone, no albedo and no sun. Hollows and north faces should
         // still be lit; if they are black, the ground bounce is not reaching them.
         rgb = pow(max(sbShIrradiance(n) * exp2(exposure), vec3f(0.0)), vec3f(1.0 / 2.2));
+    } else if (debug == SB_DEBUG_SHADOW_MAP) {
+        // Raw sun visibility. Acne reads as speckle on lit slopes, peter-panning as
+        // a gap between a caster and its shadow, and a cascade seam as a hard line
+        // across otherwise smooth ground.
+        rgb = vec3f(shadow);
+    } else if (debug == SB_DEBUG_CASCADES) {
+        // Red, green, blue by cascade, grey past the shadow distance, darkened where
+        // shadowed so the split boundaries can be checked against real shadow edges.
+        rgb = shCascadeTint(dist) * (0.35 + 0.65 * shadow);
     } else if (debug == SB_DEBUG_AERIAL) {
         // How much of this pixel is air. Should reach roughly 1 at the clipmap edge
         // — anywhere it does not, the terrain's own silhouette is visible against
@@ -89,18 +108,18 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     } else {
         let albedo = mix(uniforms.fAlbedo, uniforms.fAlbedoSteep, rock);
 
-        let l = normalize(uniforms.sbSunDir);
         // Snow does want a wrapped term — light does travel through it — but 0.35 at a
         // 12 degree sun flattened every dune face into the same value. Phase 4's real
         // subsurface earns back the softness; until then, definition matters more.
         let wrap = 0.18;
-        let ndl = clamp((dot(n, l) + wrap) / (1.0 + wrap), 0.0, 1.0);
+        let ndl = clamp((rawNdl + wrap) / (1.0 + wrap), 0.0, 1.0);
 
         // Both terms are already Lambertian reflected radiance per unit albedo, so
         // there is no stray 1/pi and no ambient constant to tune. The sky and the
         // bounce arrive together in the SH term, which is the whole point: a north
         // face under a low sun is lit by a hemisphere of snowfield, not by a number.
-        var color = albedo * (sbSunDiffuse() * ndl + sbShIrradiance(n));
+        // Only the direct term is occluded — the SH is sky, and the sky is not.
+        var color = albedo * (sbSunDiffuse() * ndl * shadow + sbShIrradiance(n));
 
         // Aerial perspective. Extinction over the path, in-scatter the colour the air
         // in that direction actually is.
