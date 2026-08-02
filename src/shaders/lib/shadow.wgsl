@@ -136,7 +136,16 @@ fn shCascadeVisibility(c: i32, world: vec3f, n: vec3f, ndl: f32) -> f32 {
 
     var visibility = 1.0;
     if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0 && receiver > 0.0 && receiver < 1.0) {
-        let bias = uniforms.shParams.y * (1.0 + 2.0 * slope);
+        // Texel quantisation, on top of the plane bias. A stored depth belongs to
+        // its texel's CENTRE, not to the tap position, so up to half a texel of
+        // lateral error rides on the receiver plane's own gradient — and on a steep
+        // slope that gradient is large. This is the residue that shows up as speckle
+        // on lit ground, and the alternative to accounting for it properly is a
+        // constant bias big enough to swallow it, which buys the speckle back as
+        // peter-panning.
+        let texel = shTexelUv().y;
+        let quantise = dot(abs(plane), vec2f(texel, texel)) * 0.75;
+        let bias = uniforms.shParams.y * (1.0 + 2.0 * slope) + quantise;
         let rotation = shDither(world);
 
         // 1. Blocker search. Deliberately NOT scaled by softness: softness is how
