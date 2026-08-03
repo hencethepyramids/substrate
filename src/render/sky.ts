@@ -7,7 +7,7 @@ import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { Vector2, Vector3, Vector4 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import type { TargetCamera } from "@babylonjs/core/Cameras/targetCamera";
-import type { Settings } from "../core/settings";
+import { TONEMAPS, type Settings } from "../core/settings";
 import type { BiomeState } from "../core/biome";
 import type { ElementDef } from "../elements/types";
 import { compileOrWarn, nextFrame } from "../core/loading";
@@ -58,8 +58,14 @@ const PROBE_PAIRS = [
  */
 const SUN_IRRADIANCE = 4.0;
 
-/** Uniforms a material needs to declare to include the sky lighting headers. */
-export const SKY_UNIFORMS = ["sbSunDir"] as const;
+/**
+ * Uniforms a material needs to declare to include the sky lighting headers.
+ *
+ * `sbTonemapMode` rides along because every material that shades also has to encode,
+ * and the dome and the ground under it have to be on the SAME curve or they cannot be
+ * read against each other. One push, one source of truth, same argument as sbSunDir.
+ */
+export const SKY_UNIFORMS = ["sbSunDir", "sbTonemapMode"] as const;
 /** Samplers likewise. Bind them with `sky.bindTo(material)`. */
 export const SKY_SAMPLERS = ["sbSkyLut", "sbSkyData"] as const;
 
@@ -350,7 +356,7 @@ export class Sky {
         m.setVector3("skForward", this._forward);
         this._params.set(s["render.exposure"], s["sky.sunDisc"] ? 1 : 0, debugCode(s["debug.view"]), 0);
         m.setVector4("skParams", this._params);
-        m.setVector3("sbSunDir", this.sunDir);
+        this.pushTo(m);
 
         // The far range starts where the clipmap stops, so the two meet with no gap
         // and no overlap. CLIPMAP_RADIUS is the one number that has to agree.
@@ -365,6 +371,7 @@ export class Sky {
     /** Push the uniforms every lit material shares. Call once per frame, per material. */
     pushTo(material: ShaderMaterial): void {
         material.setVector3("sbSunDir", this.sunDir);
+        material.setFloat("sbTonemapMode", Math.max(0, TONEMAPS.indexOf(this._settings.v["post.tonemap"] as (typeof TONEMAPS)[number])));
     }
 
     dispose(): void {

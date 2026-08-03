@@ -10,6 +10,7 @@
 #include<substrateSh>
 #include<substrateSkyData>
 #include<substrateShadow>
+#include<substrateTonemap>
 
 varying vWorld: vec3f;
 varying vNormal: vec3f;
@@ -63,6 +64,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 
     color = color * exp2(uniforms.params.y);
 
-    // Placeholder transfer only. Phase 9 replaces this with AgX in the post chain.
-    fragmentOutputs.color = vec4f(pow(max(color, vec3f(0.0)), vec3f(1.0 / 2.2)), 1.0);
+    // The same curve as the ground it stands on. A capsule on a different transfer is
+    // how you end up trusting the wrong one.
+    fragmentOutputs.color = vec4f(sbDisplay(color), 1.0);
 }

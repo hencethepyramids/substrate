@@ -15,6 +15,7 @@ import skyData from "./skyData.wgsl?raw";
 import substrateParams from "./substrateParams.wgsl?raw";
 import substrateBuffer from "./substrateBuffer.wgsl?raw";
 import brdf from "./brdf.wgsl?raw";
+import tonemap from "./tonemap.wgsl?raw";
 
 /**
  * Registers the shared WGSL includes.
@@ -56,4 +57,5 @@ export function registerShaderIncludes(): void {
     // Declares nothing, binds nothing — pure maths, so anything that shades can include
     // it. Phase 7's character takes the same lines the terrain does.
     store["substrateBrdf"] = brdf;
+    store["substrateTonemap"] = tonemap;
 }

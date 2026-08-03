@@ -13,6 +13,7 @@
 #include<substrateHeightfield>
 #include<substrateTerrainParams>
 #include<substrateFarField>
+#include<substrateTonemap>
 
 varying vRay: vec3f;
 
@@ -50,7 +51,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // beside it does not have. Same exposure and same transfer as the terrain's
         // version of this view, so the dome and the ground can be read against each
         // other rather than against two different curves.
-        rgb = pow(max(sbShIrradiance(dir) * exp2(uniforms.skParams.x), vec3f(0.0)), vec3f(1.0 / 2.2));
+        rgb = sbDisplay(sbShIrradiance(dir) * exp2(uniforms.skParams.x));
     } else {
         var color = raw.rgb;
 
@@ -97,9 +98,9 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 
         color = color * exp2(uniforms.skParams.x);
 
-        // Placeholder transfer, matched to every other material. Phase 9 replaces it
-        // with AgX in the post chain.
-        rgb = pow(max(color, vec3f(0.0)), vec3f(1.0 / 2.2));
+        // The same curve the ground is on. A dome and the terrain under it get read
+        // against each other, so two transfers would make both untrustworthy.
+        rgb = sbDisplay(color);
     }
 
     fragmentOutputs.color = vec4f(rgb, 1.0);

@@ -33,6 +33,8 @@ more than once. [scripts/checkShaders.mjs](scripts/checkShaders.mjs) is the step
 does look: it resolves the `#include` graph and fails on an unregistered include, a
 `uniforms.x` with no declaration behind it, a uniform or texture the WGSL declares
 that no TypeScript ever sets (and the reverse), a texture missing its paired sampler,
+a call to a project function nothing declares — which is what a missing `#include` looks
+like, and it survives a green build with nothing to show for it —
 an identifier used above its declaration, and a bare `return;` inside an entry point —
 which Babylon's processor turns into invalid WGSL by appending its own `return`. It
 does not compile WGSL and cannot tell you the picture is right. It closes the gap
@@ -338,6 +340,19 @@ rather than a second opinion about what a highlight looks like.
 `surface.specular`, `surface.roughness` and `surface.subsurface` are the three views.
 Specular IBL is deliberately absent: there is no prefiltered environment yet, only SH
 irradiance, so a highlight in shadow has nothing to reflect. That wants a Phase 9 LUT.
+
+**The display transfer came forward from Phase 9 with it, and had to.** A correct
+specular is enormous — the glitter path on snow at a low sun lands near 17 in
+scene-referred units against a diffuse peak of 0.85, which is simply what a real
+highlight is. Under the bare `pow(color, 1/2.2)` every phase before this one shipped,
+everything above 1 clips to flat white, so the highlight was not ugly, it was
+*undisplayable*. Retuning roughness to stop it blowing out would have been tuning the
+BRDF to compensate for a broken transfer. So [tonemap.wgsl](src/shaders/lib/tonemap.wgsl)
+lands now — AgX by default, ACES and none behind the `post.tonemap` control that has sat
+in the schema since Phase 0 — and the rest of the post chain still belongs to Phase 9.
+AgX works in log space, which is what keeps a blown highlight white instead of letting
+it drag its own hue toward the primaries. Set `post.tonemap` to `none` to see what the
+project looked like before.
 
 #### Pass C, glints — next
 

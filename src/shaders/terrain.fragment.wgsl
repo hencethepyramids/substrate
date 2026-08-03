@@ -15,6 +15,7 @@
 #include<substrateShadow>
 #include<substrateBuffer>
 #include<substrateBrdf>
+#include<substrateTonemap>
 
 varying vWorld: vec3f;
 varying vDeriv: vec2f;
@@ -150,7 +151,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     } else if (debug == SB_DEBUG_SKY_IRRADIANCE) {
         // The SH term alone, no albedo and no sun. Hollows and north faces should
         // still be lit; if they are black, the ground bounce is not reaching them.
-        rgb = pow(max(sbShIrradiance(n) * exp2(exposure), vec3f(0.0)), vec3f(1.0 / 2.2));
+        rgb = sbDisplay(sbShIrradiance(n) * exp2(exposure));
     } else if (debug == SB_DEBUG_SHADOW_MAP) {
         // Raw sun visibility. Acne reads as speckle on lit slopes, peter-panning as
         // a gap between a caster and its shadow, and a cascade seam as a hard line
@@ -179,7 +180,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     } else if (debug == SB_DEBUG_SURF_SPECULAR) {
         // The specular lobe alone, no albedo. Sand should show a tight second lobe
         // riding inside the broad one; snow should not, because its lobe mix is zero.
-        rgb = pow(max(specular * sbSunIrradiance() * shadow * exp2(exposure), vec3f(0.0)), vec3f(1.0 / 2.2));
+        rgb = sbDisplay(specular * sbSunIrradiance() * shadow * exp2(exposure));
     } else if (debug == SB_DEBUG_SURF_ROUGHNESS) {
         // Black is mirror, white is fully rough. Footprints should read DARKER than the
         // ground around them — packed material is smoother.
@@ -220,10 +221,11 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // in that direction actually is.
         color = color * transmittance + sbHazeColor(viewDir) * (vec3f(1.0) - transmittance);
 
-        color = color * exp2(exposure);
-
-        // Placeholder transfer. Phase 9 replaces this with AgX in the post chain.
-        rgb = pow(max(color, vec3f(0.0)), vec3f(1.0 / 2.2));
+        // AgX by default. Phase 4's specular is physically correct and therefore
+        // enormous — a glitter path at a low sun runs about twenty times over white —
+        // so a curve with a shoulder is not a finishing touch here, it is the only way
+        // the highlight is displayable at all.
+        rgb = sbDisplay(color * exp2(exposure));
     }
 
     // Where the buffer reaches. Its edge ramps to zero by design so that geometry never

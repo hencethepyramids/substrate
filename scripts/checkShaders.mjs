@@ -142,6 +142,18 @@ function check(where, raw) {
         if (m[1] !== "position" && !varyings.has(m[1])) err(where, `vertexOutputs.${m[1]} is written but not declared as a varying`);
     }
 
+    // calls to project functions nothing declares — i.e. a missing #include
+    //
+    // This is the one that a green `vite build` hides most convincingly: a shader can
+    // call sbDisplay(), compile in TypeScript's eyes, pass every other check here, and
+    // then fail on the driver because the include that defines it was never added. The
+    // prefix filter is what makes it safe — no WGSL builtin is named sbX or shX.
+    const declaredFns = new Set();
+    for (const m of src.matchAll(/^\s*fn\s+(\w+)\s*\(/gm)) declaredFns.add(m[1]);
+    for (const m of src.matchAll(/\b((?:sb|sd|sk|sl|sa|sp|sr|sh)[A-Z]\w*)\s*\(/g)) {
+        if (!declaredFns.has(m[1])) err(where, `${m[1]}(...) is called but no "fn ${m[1]}" is declared here or in its includes — the #include that defines it is missing`);
+    }
+
     // bare return in an entry point
     for (const m of src.matchAll(/@(fragment|vertex)\s+fn\s+(\w+)[\s\S]*?\n\}/g)) {
         if (/\breturn\s*;/.test(m[0])) {
