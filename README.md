@@ -153,6 +153,39 @@ again while the sun is still.
   is. `sky.aerialScale` defaults above 1 only because the clipmap still stops at 870 m
   and haze is doing the work the far-range raymarch will take over in pass B.
 
+### Phase 3 plan, the substrate buffer
+
+> Carve it, and it holds. Snow keeps a wall, sand collapses at 34 degrees, ash never
+> comes back. One pass, no branch on biome.
+
+The hinge of the project: every phase from 4 onward reads this buffer. Split in two,
+for the same reason Phase 2 was — a wrong data layout here is expensive to undo.
+
+**Pass 1, the buffer and the relaxation.** A camera-following window (the
+`debug.showSubstrateWindow` toggle has been waiting since Phase 0), ping-ponged
+between two RGBA32F targets, with one relaxation pass per frame:
+
+| channel | holds |
+| --- | --- |
+| R | depression depth, metres below the heightfield |
+| G | displaced mass, conserved by slump |
+| B | compaction 0..1 — packed snow, wet sand, crushed ash |
+| A | phase state, which Phase 6 drives with heat |
+
+The pass does slump toward `angleOfRepose`, isotropic `diffusionRate` spreading, and
+`decayHalfLife` recovery, with `cohesion` resisting all three and `slumpAnisotropy`
+biasing berm against floor. Seven numbers, already in `SubstrateParams` since Phase 0,
+consumed by shared code — the architectural test is that desert differs from snow by
+those numbers and nothing else.
+
+Verified by dropping a test depression in and watching it: snow holds a near-vertical
+wall, sand collapses to 34 degrees, ash sits and never recovers. The four
+`substrate.*` debug views exist for exactly this.
+
+**Pass 2, writing into it.** The character's feet, then whatever Phase 8 wants. The
+right mouse button has been consuming a carve input since Phase 0 with nothing behind
+it.
+
 ### Controls
 
 | | |
