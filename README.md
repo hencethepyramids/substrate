@@ -280,10 +280,18 @@ Split three ways, smallest and highest-value first.
   is the analytic derivative of the *same* interpolation the depression came from, off
   the *same* four texels — so the normal cannot describe a surface different from the one
   the buffer describes, and it costs no extra texture reads.
-- **Smoothstep weights, not linear ones.** Plain bilinear is C0: its gradient is constant
-  inside a texel and jumps at the boundary, which turns a footprint into a 6 cm grid of
-  flat facets that crawl as you walk. `u = f²(3-2f)` is C1, and `du/df = 6f(1-f)` carries
-  that into the gradient. Two multiplies.
+- **Catmull-Rom, and the stencil has to be four wide.** A gradient off plain bilinear is
+  constant inside a texel and jumps at the boundary — a footprint becomes a grid of flat
+  facets. The obvious repair, smoothstep weights, is *worse*: `du/df = 6f(1-f)` is zero
+  at every node, so the normal flattens on a lattice and peaks between. It shipped that
+  way for one run and the grid was unmistakable. No 2×2 filter escapes it — matching the
+  derivative across a cell boundary for arbitrary samples forces `w'(0) = w'(1) = 0`, so
+  any four-texel filter smooth enough to hide its seams has lattice-locked zeros in its
+  derivative. Catmull-Rom interpolates exactly, is C1, and its derivative reduces to the
+  central difference at every node.
+- **Sixteen loads, but only inside the window.** The buffer covers 32 m and the clipmap
+  draws to 870, so the common case was sixteen loads for a guaranteed zero. One compare
+  skips it, and the branch is screen-space coherent.
 - **The geometry is still untouched.** A 24 cm print is three clipmap vertices at best,
   so nothing is displaced — but light does not care whether it was told about a surface
   by a vertex or by a normal, and at this scale the normal is the honest channel. It

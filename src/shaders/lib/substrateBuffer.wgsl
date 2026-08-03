@@ -71,6 +71,43 @@ fn sbSubTexel(c: vec2i) -> vec4f {
     return textureLoad(sbSubTex, clamp(c, vec2i(0, 0), vec2i(m, m)), 0);
 }
 
+/// Catmull-Rom basis over four taps at -1, 0, 1, 2, and its derivative.
+///
+/// Sum of the weights is 1 and sum of the derivative weights is 0, at every t. At t = 0
+/// the weights collapse to (0,1,0,0), so it passes exactly through the samples, and the
+/// derivative weights become (-0.5, 0, 0.5, 0) — the plain central difference. At t = 1
+/// they become the central difference at the NEXT node, which is what makes the
+/// derivative continuous across a cell boundary without ever being zero there.
+fn sbCubic(t: f32) -> vec4f {
+    let t2 = t * t;
+    let t3 = t2 * t;
+    return vec4f(-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2);
+}
+
+fn sbCubicD(t: f32) -> vec4f {
+    let t2 = t * t;
+    return vec4f(-1.5 * t2 + 2.0 * t - 0.5, 4.5 * t2 - 5.0 * t, -4.5 * t2 + 4.0 * t + 0.5, 1.5 * t2 - t);
+}
+
+struct SbSubRow {
+    /// All four channels, weighted along x.
+    v: vec4f,
+    /// The depression channel weighted by the DERIVATIVE along x.
+    dr: f32,
+};
+
+/// One row of the 4x4 footprint, weighted both ways from a single set of four loads.
+fn sbSubRow(c: vec2i, row: i32, wx: vec4f, dx: vec4f) -> SbSubRow {
+    let t0 = sbSubTexel(c + vec2i(-1, row));
+    let t1 = sbSubTexel(c + vec2i(0, row));
+    let t2 = sbSubTexel(c + vec2i(1, row));
+    let t3 = sbSubTexel(c + vec2i(2, row));
+    var r: SbSubRow;
+    r.v = t0 * wx.x + t1 * wx.y + t2 * wx.z + t3 * wx.w;
+    r.dr = t0.r * dx.x + t1.r * dx.y + t2.r * dx.z + t3.r * dx.w;
+    return r;
+}
+
 /// The substrate at a world XZ, and the slope of it.
 ///
 /// Explicit interpolation over textureLoad, for the same two reasons
@@ -78,42 +115,66 @@ fn sbSubTexel(c: vec2i) -> vec4f {
 /// it is reproducible on the CPU, which is what will let Phase 7's per-foot contact be
 /// exact rather than close.
 ///
-/// SMOOTHSTEP WEIGHTS, NOT LINEAR ONES. Plain bilinear is C0 — its gradient is constant
-/// within a texel and jumps at every boundary. Taking a normal from that turns a
-/// footprint into a 6 cm grid of flat facets, and the facets are in world space so they
-/// crawl as you walk. u = f*f*(3-2f) is C1, so the gradient is continuous, and
-/// du/df = 6f(1-f) is what carries the smoothing into it. Two extra multiplies.
+/// CATMULL-ROM, AND IT HAS TO BE A FOUR-WIDE STENCIL. This is not a preference.
+///
+/// A gradient taken from plain bilinear is constant inside a texel and jumps at the
+/// boundary: a footprint becomes a grid of flat facets with hard seams. The obvious
+/// repair — smoothstep weights, u = f*f*(3-2f) — is worse, because du/df = 6f(1-f) is
+/// ZERO AT EVERY NODE. The normal then flattens on a lattice and peaks between, which
+/// reads as the same grid with softer edges. Measured on hardware; it was obvious.
+///
+/// And no 2x2 filter can avoid it. Matching the derivative across a cell boundary needs
+/// w'(1)*(v1-v0) = w'(0)*(v2-v1) for arbitrary samples, which forces w'(0) = w'(1) = 0.
+/// Any four-texel filter smooth enough to hide its seams has lattice-locked zeros in its
+/// derivative, so the stencil has to get wider. Catmull-Rom interpolates its samples
+/// exactly, is C1, and its derivative reduces to the central difference at every node —
+/// continuous, and never zero for the wrong reason.
+///
+/// Sixteen loads, but only inside the window. See the early out.
 fn sbSubstrateAt(worldXZ: vec2f) -> SbSubstrate {
+    var s: SbSubstrate;
+    s.depression = 0.0;
+    s.mass = 0.0;
+    s.compaction = 0.0;
+    s.phase = 0.0;
+    s.slope = vec2f(0.0, 0.0);
+
+    // MOST OF THE SCREEN IS OUTSIDE THE WINDOW. The buffer covers 32 m and the clipmap
+    // draws to 870, so the common case is sixteen texture loads for a guaranteed zero.
+    // Spend a compare instead — the branch is screen-space coherent, so it costs a
+    // fraction of what it saves.
+    let w = sbSubWindow(worldXZ);
+    if (w <= 0.0) {
+        return s;
+    }
+
     let texelsPerMetre = uniforms.sbSubSize / uniforms.sbSubExtent;
     let t = (worldXZ - uniforms.sbSubOrigin) * texelsPerMetre - 0.5;
     let i = floor(t);
     let f = t - i;
     let c = vec2i(i);
 
-    let v00 = sbSubTexel(c + vec2i(0, 0));
-    let v10 = sbSubTexel(c + vec2i(1, 0));
-    let v01 = sbSubTexel(c + vec2i(0, 1));
-    let v11 = sbSubTexel(c + vec2i(1, 1));
+    let wx = sbCubic(f.x);
+    let dwx = sbCubicD(f.x);
+    let wy = sbCubic(f.y);
+    let dwy = sbCubicD(f.y);
 
-    let u = f * f * (3.0 - 2.0 * f);
-    let du = 6.0 * f * (1.0 - f);
+    let r0 = sbSubRow(c, -1, wx, dwx);
+    let r1 = sbSubRow(c, 0, wx, dwx);
+    let r2 = sbSubRow(c, 1, wx, dwx);
+    let r3 = sbSubRow(c, 2, wx, dwx);
 
-    let lo = mix(v00, v10, u.x);
-    let hi = mix(v01, v11, u.x);
-    let w = sbSubWindow(worldXZ);
-    let v = mix(lo, hi, u.y) * w;
-
-    var s: SbSubstrate;
+    let v = (r0.v * wy.x + r1.v * wy.y + r2.v * wy.z + r3.v * wy.w) * w;
     s.depression = v.r;
     s.mass = v.g;
     s.compaction = v.b;
     s.phase = v.a;
 
-    // Chain rule through the interpolation, then out of texel space into metres. The
-    // window's own ramp is not differentiated: it only bites in the last 8 texels, where
-    // the buffer holds nothing worth taking a normal from anyway.
-    let dx = ((v10.r - v00.r) + ((v11.r - v01.r) - (v10.r - v00.r)) * u.y) * du.x;
-    let dz = ((v01.r - v00.r) + ((v11.r - v10.r) - (v01.r - v00.r)) * u.x) * du.y;
-    s.slope = vec2f(dx, dz) * texelsPerMetre * w;
+    // Out of texel space into metres. The window's own ramp is not differentiated: it
+    // only bites in the last 8 texels, where the buffer holds nothing worth taking a
+    // normal from anyway.
+    let gx = r0.dr * wy.x + r1.dr * wy.y + r2.dr * wy.z + r3.dr * wy.w;
+    let gz = r0.v.r * dwy.x + r1.v.r * dwy.y + r2.v.r * dwy.z + r3.v.r * dwy.w;
+    s.slope = vec2f(gx, gz) * texelsPerMetre * w;
     return s;
 }
