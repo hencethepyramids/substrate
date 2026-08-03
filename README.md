@@ -360,10 +360,29 @@ AgX works in log space, which is what keeps a blown highlight white instead of l
 it drag its own hue toward the primaries. Set `post.tonemap` to `none` to see what the
 project looked like before.
 
-#### Pass C, glints — next
+#### Pass C, glints and emission — landed
 
-`glintDensity` and `glintBasis` as procedural sparkle, and `emissiveGain` wired to the
-heat channel Phase 6 will drive.
+- **A snowfield does not have one microfacet distribution.** It has a few million ice
+  crystals, and at any instant a handful happen to bisect the eye and the sun exactly.
+  That is a different phenomenon from roughness — it does not smear out with the lobe,
+  it *flashes* — and averaging it into the BRDF is precisely what loses it. So glints
+  are one facet per lattice cell, cell size from the element's glints per square metre,
+  and only the tail of the distribution is kept so they read as scattered sparks rather
+  than a shimmering sheet. `glintBasis` offsets the lattice so no two elements sparkle
+  in the same pattern.
+- **The facets come from `sbHash2`**, the same and only hash in the project — the one
+  Phase 1's gradient noise is built on.
+- **They fade out by 26 m**, because sub-pixel sparkle is not detail, it is noise, and
+  it crawls. Same argument as the substrate relief fade and the same shape of answer.
+- **`emissiveGain` is wired to the phase channel** and is identically zero until Phase 6
+  drives it with heat — the same move as `spThermalCoupling` in Phase 3, so Phase 6 only
+  has to *write* the channel and cannot introduce a second opinion about what hot
+  material looks like.
+
+**All nine `SurfaceParams` fields are now consumed by shared code**, which is the
+architectural test for that block: albedo, albedoCompacted, baseRoughness,
+subsurfaceTint, subsurfaceStrength, glintDensity, glintBasis, dualLobeMix, emissiveGain.
+No branch on biome anywhere in the surface shader.
 
 ### Controls
 

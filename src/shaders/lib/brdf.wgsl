@@ -58,6 +58,69 @@ fn sbSpecularDual(n: vec3f, v: vec3f, l: vec3f, roughness: f32, lobeMix: f32) ->
     return mix(broad, sharp, lobeMix);
 }
 
+/// How far a glint facet tilts off the surface normal, and how tight its flash is.
+const SB_GLINT_SPREAD: f32 = 0.38;
+const SB_GLINT_POWER: f32 = 420.0;
+/// Keep only the tail of the distribution. This is what makes glints read as scattered
+/// sparks rather than as a shimmering sheet.
+const SB_GLINT_SPARSITY: f32 = 0.82;
+const SB_GLINT_NEAR: f32 = 9.0;
+const SB_GLINT_FAR: f32 = 26.0;
+
+/// Specular glints from individual facets.
+///
+/// A snowfield does not have one microfacet distribution, it has a few million ice
+/// crystals, and at any instant a handful of them happen to bisect the eye and the sun
+/// exactly. That is a different phenomenon from roughness — it does not smear out with
+/// the lobe, it flashes — and averaging it into the BRDF is precisely what loses it.
+///
+/// One facet per lattice cell, cell size set by the element's glints per square metre.
+/// `glintBasis` offsets the lattice so the three elements never sparkle in the same
+/// pattern, which is why it is a separate number from the density.
+///
+/// Requires <substrateNoise> for sbHash2 — the one hash in the project.
+fn sbGlints(worldXZ: vec2f, n: vec3f, h: vec3f, density: f32, basis: f32, dist: f32) -> f32 {
+    // Sub-pixel sparkle is not detail, it is noise, and it crawls. Same argument as the
+    // substrate relief fade and the same shape of answer.
+    let fade = clamp(1.0 - (dist - SB_GLINT_NEAR) / (SB_GLINT_FAR - SB_GLINT_NEAR), 0.0, 1.0);
+    if (fade <= 0.0 || density <= 0.0) {
+        return 0.0;
+    }
+
+    let cellSize = inverseSqrt(density);
+    let cell = vec2i(floor(worldXZ / cellSize)) + vec2i(i32(basis) * 131, i32(basis) * 977);
+
+    // Two independent draws: which way this facet leans, and how far.
+    let dir = sbHash2(cell);
+    let draw = sbHash2(cell + vec2i(19, 47));
+    let alive = step(SB_GLINT_SPARSITY, draw.y * 0.5 + 0.5);
+
+    // Tangent frame. The branch dodges a degenerate cross product on level ground.
+    var up = vec3f(0.0, 1.0, 0.0);
+    if (abs(n.y) > 0.9) {
+        up = vec3f(0.0, 0.0, 1.0);
+    }
+    let t = normalize(cross(up, n));
+    let b = cross(n, t);
+
+    let micro = normalize(n + (t * dir.x + b * dir.y) * (SB_GLINT_SPREAD * (draw.x * 0.5 + 0.5)));
+    return pow(max(dot(micro, h), 0.0), SB_GLINT_POWER) * alive * fade;
+}
+
+/// Emission from the phase channel, as radiance.
+///
+/// Phase 6 is what drives phase with heat. Until then this is identically zero
+/// everywhere and costs three instructions — wired now for the same reason
+/// spThermalCoupling was, so Phase 6 only has to WRITE the channel and cannot introduce
+/// a second opinion about what hot material looks like.
+fn sbEmissive(phase: f32, gain: f32) -> vec3f {
+    let t = clamp(phase, 0.0, 1.0);
+    // A crude blackbody walk: dull red, through orange, toward white-hot. Quadratic in
+    // t so that merely warm material does not glow.
+    let hue = vec3f(1.0, 0.08 + 0.35 * t, 0.02 + 0.25 * t * t);
+    return hue * (gain * t * t * 4.0);
+}
+
 /// Diffuse plus subsurface back-scatter, per unit irradiance.
 ///
 /// Light that enters the surface, scatters inside it and comes back out does not respect

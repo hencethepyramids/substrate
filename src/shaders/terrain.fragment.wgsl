@@ -14,6 +14,8 @@
 #include<substrateSkyData>
 #include<substrateShadow>
 #include<substrateBuffer>
+// Above substrateBrdf: the glints draw their facets from sbHash2, the one hash.
+#include<substrateNoise>
 #include<substrateBrdf>
 #include<substrateTonemap>
 
@@ -30,6 +32,8 @@ uniform fParams: vec4f; // x: exposure, y: debug view, z: level count, w: show s
 // x: relief strength, y: base roughness, z: subsurface strength, w: dual-lobe mix.
 uniform fSurface: vec4f;
 uniform fSubsurfaceTint: vec3f;
+// x: glints per square metre, y: glint lattice basis, z: glint strength, w: emissive gain.
+uniform fGrain: vec4f;
 
 /// Packed material is smoother than the loose material it was made from, so a print in
 /// snow catches a highlight the powder around it does not. One more thing the compaction
@@ -52,6 +56,7 @@ const SB_DEBUG_SUB_PHASE: f32 = 13.0;
 const SB_DEBUG_SURF_SPECULAR: f32 = 14.0;
 const SB_DEBUG_SURF_ROUGHNESS: f32 = 15.0;
 const SB_DEBUG_SURF_SUBSURFACE: f32 = 16.0;
+const SB_DEBUG_SURF_GLINTS: f32 = 17.0;
 
 /// Full scale for the metric substrate channels, in metres. A 25 cm hollow saturates.
 const SB_SUB_FULL_SCALE: f32 = 0.25;
@@ -131,6 +136,8 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let roughness = clamp(uniforms.fSurface.y * mix(1.0, SB_PACKED_SMOOTH, sub.compaction), 0.03, 1.0);
     // `viewDir` runs camera -> surface, so the eye vector is its negation.
     let specular = sbSpecularDual(n, -viewDir, l, roughness, uniforms.fSurface.w);
+    let half = normalize(l - viewDir);
+    let glint = sbGlints(input.vWorld.xz, n, half, uniforms.fGrain.x, uniforms.fGrain.y, dist) * uniforms.fGrain.z;
 
     var rgb: vec3f;
 
@@ -191,6 +198,11 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // brightest on the faces turning away from it.
         let lit = sbDiffuseSss(vec3f(1.0), rawNdl, uniforms.fSubsurfaceTint, uniforms.fSurface.z);
         rgb = max(lit - vec3f(max(rawNdl, 0.0)), vec3f(0.0)) * 4.0;
+    } else if (debug == SB_DEBUG_SURF_GLINTS) {
+        // The facets alone. Should be scattered sparks near the camera, thinning to
+        // nothing by 26 m — if it reads as a shimmering sheet the sparsity is too low,
+        // and if it crawls as you walk the lattice is not world-locked.
+        rgb = vec3f(clamp(glint, 0.0, 1.0));
     } else if (debug == SB_DEBUG_AERIAL) {
         // How much of this pixel is air. Should reach roughly 1 at the clipmap edge
         // — anywhere it does not, the terrain's own silhouette is visible against
@@ -215,7 +227,10 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // Specular, from the same sun. sbSunIrradiance is the perpendicular irradiance
         // Phase 2 put in the data texture for exactly this, so the highlight cannot
         // drift from the sky it is a reflection of.
-        color = color + specular * sbSunIrradiance() * shadow;
+        color = color + (specular + glint) * sbSunIrradiance() * shadow;
+
+        // Emission. Identically zero until Phase 6 drives the phase channel with heat.
+        color = color + sbEmissive(sub.phase, uniforms.fGrain.w);
 
         // Aerial perspective. Extinction over the path, in-scatter the colour the air
         // in that direction actually is.

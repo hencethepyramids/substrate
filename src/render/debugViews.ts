@@ -29,6 +29,7 @@ export const DEBUG_CODES: Record<string, number> = {
     "surface.specular": 14,
     "surface.roughness": 15,
     "surface.subsurface": 16,
+    "surface.glints": 17,
 };
 
 export function debugCode(view: string): number {

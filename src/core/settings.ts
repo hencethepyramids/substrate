@@ -63,6 +63,7 @@ export const DEBUG_VIEWS = [
     "surface.specular",
     "surface.roughness",
     "surface.subsurface",
+    "surface.glints",
     "wind",
     "fuel",
     "heat",
@@ -154,6 +155,11 @@ export const SCHEMA = {
     "substrate.carveRadius": num({ group: "Substrate", label: "Carve radius", def: 0.4, min: 0.1, max: 4, step: 0.05, unit: "m", hint: "Shared by the held carve and the test pit." }),
     "substrate.carveRate": num({ group: "Substrate", label: "Carve rate", def: 1.2, min: 0, max: 6, step: 0.05, unit: "m/s", hint: "Depth per second while right mouse is held, so how long you hold it is what decides how deep it goes." }),
     "substrate.testDepth": num({ group: "Substrate", label: "Test pit depth", def: 0.5, min: 0.01, max: 1.5, step: 0.01, unit: "m", hint: "One-shot, for the acceptance test. A stamp's steepest face is 0.736 x depth / radius: the default is 43 degrees, past sand's limit and nowhere near snow's." }),
+
+    // -- Surface -------------------------------------------------------------
+    // The look controls Phase 4 owns. Everything that differs BETWEEN elements is in
+    // elements/registry.ts; these scale all of them at once.
+    "surface.glintStrength": num({ group: "Surface", label: "Glints", def: 1, min: 0, max: 3, step: 0.05, hint: "Scales the per-facet sparkle. Density and lattice come from the element; this is the global dial. 0 turns it off." }),
 
     // -- Render --------------------------------------------------------------
     "render.resolutionScale": num({ group: "Render", label: "Resolution scale", def: 1, min: 0.5, max: 2, step: 0.05 }),
