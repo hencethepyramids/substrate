@@ -370,6 +370,15 @@ project looked like before.
   and only the tail of the distribution is kept so they read as scattered sparks rather
   than a shimmering sheet. `glintBasis` offsets the lattice so no two elements sparkle
   in the same pattern.
+- **A spark sits inside its cell; it is not the cell.** The first version gave each cell
+  one facet with a constant normal, so the whole cell flashed at once — and a flashing
+  cell is a square in world space, which is a diamond on screen. It drew a lattice of
+  tiles, exactly as visible in `surface.glints`. The lattice sets where a crystal *might*
+  be; the crystal is far smaller than the patch of ground it was drawn from.
+- **Never narrower than a pixel.** A spark below a pixel is static, not sparkle, so the
+  radius is floored at the screen-space footprint — and because widening it would
+  brighten the field, the normalisation takes back exactly what the widening added, so a
+  receding glint field dims instead of boiling.
 - **The facets come from `sbHash2`**, the same and only hash in the project — the one
   Phase 1's gradient noise is built on.
 - **They fade out by 26 m**, because sub-pixel sparkle is not detail, it is noise, and
