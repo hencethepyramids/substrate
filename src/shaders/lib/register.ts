@@ -16,6 +16,7 @@ import substrateParams from "./substrateParams.wgsl?raw";
 import substrateBuffer from "./substrateBuffer.wgsl?raw";
 import brdf from "./brdf.wgsl?raw";
 import tonemap from "./tonemap.wgsl?raw";
+import air from "./air.wgsl?raw";
 
 /**
  * Registers the shared WGSL includes.
@@ -58,4 +59,6 @@ export function registerShaderIncludes(): void {
     // it. Phase 7's character takes the same lines the terrain does.
     store["substrateBrdf"] = brdf;
     store["substrateTonemap"] = tonemap;
+    // Declares no texture either: the wind is a function of the terrain, not a buffer.
+    store["substrateAir"] = air;
 }

@@ -51,7 +51,7 @@ between "builds" and "the driver will accept this".
 | 2 — sky, lighting, atmosphere | done |
 | 3 — substrate buffer | **done** |
 | 4 — surface materials | **done** |
-| 5 — air | not started |
+| 5 — air | **pass A landed, B next** |
 | 6 — fire | not started |
 | 7 — character | not started |
 | 8 — traversal and wakes | not started |
@@ -398,6 +398,41 @@ No branch on biome anywhere in the surface shader.
 version drew. This is the phase where the buffer stops being a debug view: a print in
 fresh snow is a shaded dimple with its own albedo and its own roughness, and the glitter
 path runs behind it.
+
+### Phase 5, air
+
+> The wind is not a buffer.
+
+#### Pass A, the velocity field — landed
+
+Air over a heightfield is a **pure function** of the heightfield and the free-stream
+wind, so storing it would mean keeping a second copy of something already known, in sync
+by hand, at a resolution someone has to justify. [air.wgsl](src/shaders/lib/air.wgsl)
+declares no texture at all and takes the terrain derivative as an argument, which is what
+keeps it that way. Evaluating it costs a dot product and a smoothstep.
+
+Three things happen to wind crossing a dune, and all three fall out of that one dot
+product with the slope:
+
+- it **accelerates** up the windward face, because the streamlines compress against
+  rising ground — which is why the stoss side is stripped and the trough is not;
+- it **separates** past the crest once the lee is steep enough that the flow cannot stay
+  attached, leaving a bubble where the near-surface air runs backwards — which is why a
+  slip face is where material lands and *stays* rather than being carried onward, and
+  therefore why dunes migrate at all;
+- it **follows the surface**, which fixes the vertical component exactly and with no free
+  parameter: `w = horizontal · grad(h)` is the kinematic boundary condition.
+
+Gusts advect downwind rather than pulsing in place, so a lull travels across the field
+the way a real one does. The `wind` debug view shows shear as brightness and separation
+as red.
+
+#### Pass B, airborne material — next
+
+Loose mass past `liftThreshold` leaves the ground, advects on this field, and settles
+back into the substrate buffer — with `windSusceptibility` deciding how strongly each
+element couples. Both numbers have been in `SubstrateParams` since Phase 0 waiting for
+it. That one *does* carry history, so it does get a buffer.
 
 ### Controls
 

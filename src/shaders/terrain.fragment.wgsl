@@ -18,6 +18,8 @@
 #include<substrateNoise>
 #include<substrateBrdf>
 #include<substrateTonemap>
+// Below substrateNoise: the gusts ride on sbNoiseD.
+#include<substrateAir>
 
 varying vWorld: vec3f;
 varying vDeriv: vec2f;
@@ -57,6 +59,7 @@ const SB_DEBUG_SURF_SPECULAR: f32 = 14.0;
 const SB_DEBUG_SURF_ROUGHNESS: f32 = 15.0;
 const SB_DEBUG_SURF_SUBSURFACE: f32 = 16.0;
 const SB_DEBUG_SURF_GLINTS: f32 = 17.0;
+const SB_DEBUG_WIND: f32 = 18.0;
 
 /// Full scale for the metric substrate channels, in metres. A 25 cm hollow saturates.
 const SB_SUB_FULL_SCALE: f32 = 0.25;
@@ -203,6 +206,14 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // nothing by 26 m — if it reads as a shimmering sheet the sparsity is too low,
         // and if it crawls as you walk the lattice is not world-locked.
         rgb = vec3f(clamp(glint, 0.0, 1.0));
+    } else if (debug == SB_DEBUG_WIND) {
+        // Surface shear as brightness, separation as red. The picture to look for is a
+        // dune lit along its windward face and going dark-red just past the crest: that
+        // dark band is the recirculating bubble, it is where material lands and stays,
+        // and it is the whole reason a dune moves.
+        let air = sbAirAt(input.vWorld.xz, input.vDeriv);
+        let flow = clamp(air.shear * 0.5, 0.0, 1.0);
+        rgb = vec3f(0.04) + vec3f(0.25, 0.7, 1.0) * flow * (1.0 - air.separated) + vec3f(0.9, 0.15, 0.1) * air.separated;
     } else if (debug == SB_DEBUG_AERIAL) {
         // How much of this pixel is air. Should reach roughly 1 at the clipmap edge
         // — anywhere it does not, the terrain's own silhouette is visible against

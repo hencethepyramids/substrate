@@ -17,6 +17,7 @@ import { Shadows } from "./render/shadows";
 import { Terrain } from "./terrain/terrain";
 import { Substrate } from "./substrate/substrate";
 import { Carve } from "./substrate/carve";
+import { AirField } from "./air/airField";
 import { PlaceholderCharacter } from "./character/placeholder";
 import { registerShaderIncludes } from "./shaders/lib/register";
 import { Overlay } from "./ui/overlay";
@@ -63,6 +64,7 @@ async function boot(): Promise<void> {
 
     const mover = new Mover(settings);
     const carve = new Carve(settings);
+    const air = new AirField(settings);
 
     loader.add("requesting device", 3, async () => {
         engine = await createEngine(canvas, capability);
@@ -89,6 +91,7 @@ async function boot(): Promise<void> {
         // declares the substrate sampler, so the binding has to exist by the first frame.
         substrate = new Substrate(scene, settings, biome, terrain.field);
         terrain.setSubstrate(substrate);
+        terrain.setAir(air);
         character = new PlaceholderCharacter(scene, settings, sky, shadows);
         shadows.setCasters(terrain.mesh, [character.mesh]);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
@@ -239,7 +242,10 @@ async function boot(): Promise<void> {
         // binds its own render target while doing so. Simulation time, not real time —
         // the ground freezes when the world is paused.
         perf.begin(S_SUBSTRATE);
-        // Sources first, then the step that consumes them.
+        // The wind first: Phase 5's second pass will lift material with it, and the
+        // beauty pass reads it this frame either way.
+        air.update(simDt);
+        // Then the carve sources, then the step that consumes them.
         carve.update(input, mover, substrate, simDt);
         substrate.update(rig.camera, simDt);
         perf.end(S_SUBSTRATE);

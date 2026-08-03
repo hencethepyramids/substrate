@@ -11,6 +11,7 @@ import type { ElementDef } from "../elements/types";
 import { Sky, SKY_UNIFORMS, SKY_SAMPLERS, WORLD_GROUP } from "../render/sky";
 import { Shadows, SHADOW_UNIFORMS, SHADOW_SAMPLERS } from "../render/shadows";
 import { SUBSTRATE_UNIFORMS, SUBSTRATE_SAMPLERS, type Substrate } from "../substrate/substrate";
+import { AIR_UNIFORMS, type AirField } from "../air/airField";
 import { debugCode } from "../render/debugViews";
 import { Heightfield } from "./heightfield";
 import { buildClipmapMesh, CLIPMAP, type ClipmapStats } from "./clipmapMesh";
@@ -24,7 +25,7 @@ import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
 
 const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
 
-const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", "fSubsurfaceTint", "fGrain", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS];
+const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", "fSubsurfaceTint", "fGrain", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS, ...AIR_UNIFORMS];
 
 export class Terrain {
     readonly field: Heightfield;
@@ -50,6 +51,7 @@ export class Terrain {
     private _element: ElementDef;
     private _rebakeQueued = false;
     private _substrate: Substrate | null = null;
+    private _air: AirField | null = null;
 
     constructor(scene: Scene, settings: Settings, biome: BiomeState, sky: Sky, shadows: Shadows) {
         this._settings = settings;
@@ -117,6 +119,12 @@ export class Terrain {
         substrate.pushTo(this.material);
     }
 
+    /** Hand the terrain the wind. Called from main once the field exists. */
+    setAir(air: AirField): void {
+        this._air = air;
+        air.pushTo(this.material);
+    }
+
     /** Compiles the pipeline and bakes the field. Runs behind the loading screen. */
     async prepare(report?: (fraction: number) => void): Promise<void> {
         try {
@@ -178,6 +186,7 @@ export class Terrain {
         m.setColor3("fSubsurfaceTint", this._subsurfaceTint);
         this._grain.set(surf.glintDensity, surf.glintBasis, s["surface.glintStrength"], surf.emissiveGain);
         m.setVector4("fGrain", this._grain);
+        this._air?.pushTo(m);
     }
 
     dispose(): void {

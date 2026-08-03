@@ -156,6 +156,15 @@ export const SCHEMA = {
     "substrate.carveRate": num({ group: "Substrate", label: "Carve rate", def: 1.2, min: 0, max: 6, step: 0.05, unit: "m/s", hint: "Depth per second while right mouse is held, so how long you hold it is what decides how deep it goes." }),
     "substrate.testDepth": num({ group: "Substrate", label: "Test pit depth", def: 0.5, min: 0.01, max: 1.5, step: 0.01, unit: "m", hint: "One-shot, for the acceptance test. A stamp's steepest face is 0.736 x depth / radius: the default is 43 degrees, past sand's limit and nowhere near snow's." }),
 
+    // -- Air -----------------------------------------------------------------
+    // The wind is a function of the terrain, not a buffer. world.windStrength and
+    // world.windBearing say how hard and from where; these say what the ground does to it.
+    "air.maxSpeed": num({ group: "Air", label: "Wind speed at full", def: 18, min: 0, max: 40, step: 0.5, unit: "m/s", hint: "What world.windStrength = 1 means in metres per second." }),
+    "air.speedup": num({ group: "Air", label: "Slope speed-up", def: 1.2, min: 0, max: 4, step: 0.05, hint: "How much a windward face accelerates the flow. This is the term that strips a stoss face and fills the trough, so it is what actually migrates a dune." }),
+    "air.separation": num({ group: "Air", label: "Separation slope", def: 0.35, min: 0.05, max: 2, step: 0.01, hint: "Lee slope at which the flow detaches and recirculates. Below the slip face nothing is carried onward, which is why material lands there and stays." }),
+    "air.gustScale": num({ group: "Air", label: "Gust scale", def: 0.02, min: 0.002, max: 0.2, step: 0.002, unit: "1/m", advanced: true }),
+    "air.gustAmount": num({ group: "Air", label: "Gust amount", def: 0.35, min: 0, max: 1, step: 0.01, advanced: true, hint: "Gusts advect downwind rather than pulsing in place." }),
+
     // -- Surface -------------------------------------------------------------
     // The look controls Phase 4 owns. Everything that differs BETWEEN elements is in
     // elements/registry.ts; these scale all of them at once.
