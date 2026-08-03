@@ -427,6 +427,13 @@ Gusts advect downwind rather than pulsing in place, so a lull travels across the
 the way a real one does. The `wind` debug view shows shear as brightness and separation
 as red.
 
+**Known approximation:** separation is decided by the local lee slope, so the bubble sits
+on the slip face itself and does not extend downwind into the trough the way a real wake
+does — that would need a march upwind to find the governing crest, which is a per-pixel
+raymarch. The asymmetry that drives dune migration is the shear differential between
+stoss and lee, and that is captured; the reach of the wake is not, and pass B will say
+whether it has to be.
+
 #### Pass B, airborne material — next
 
 Loose mass past `liftThreshold` leaves the ground, advects on this field, and settles

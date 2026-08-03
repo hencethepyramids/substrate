@@ -64,7 +64,13 @@ fn sbAirAt(worldXZ: vec2f, deriv: vec2f) -> SbAir {
     let along = dot(deriv, dir);
 
     let speedup = max(1.0 + uniforms.swParams.x * along, 0.0);
-    let sep = smoothstep(0.0, -max(uniforms.swParams.y, 1.0e-3), along);
+
+    // Separation begins at HALF the threshold slope and is complete at it, rather than
+    // ramping all the way from flat. A gently sloping lee does not detach — the flow
+    // stays glued to it — and starting the ramp at zero marked every downwind face in
+    // the world as a recirculation bubble, which is most of the terrain.
+    let brink = max(uniforms.swParams.y, 1.0e-3);
+    let sep = smoothstep(-brink * 0.5, -brink, along);
 
     // Attached flow over the crest, and a weak reversed flow in the bubble behind it.
     let attached = dir * (speed * speedup * gust * (1.0 - sep));

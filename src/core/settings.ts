@@ -161,7 +161,7 @@ export const SCHEMA = {
     // world.windBearing say how hard and from where; these say what the ground does to it.
     "air.maxSpeed": num({ group: "Air", label: "Wind speed at full", def: 18, min: 0, max: 40, step: 0.5, unit: "m/s", hint: "What world.windStrength = 1 means in metres per second." }),
     "air.speedup": num({ group: "Air", label: "Slope speed-up", def: 1.2, min: 0, max: 4, step: 0.05, hint: "How much a windward face accelerates the flow. This is the term that strips a stoss face and fills the trough, so it is what actually migrates a dune." }),
-    "air.separation": num({ group: "Air", label: "Separation slope", def: 0.35, min: 0.05, max: 2, step: 0.01, hint: "Lee slope at which the flow detaches and recirculates. Below the slip face nothing is carried onward, which is why material lands there and stays." }),
+    "air.separation": num({ group: "Air", label: "Separation slope", def: 0.62, min: 0.05, max: 2, step: 0.01, hint: "Lee slope at which the flow fully detaches, as a gradient — 0.62 is about 32 degrees, near the angle of repose, which is where a real slip face sits. Detachment begins at half of it." }),
     "air.gustScale": num({ group: "Air", label: "Gust scale", def: 0.02, min: 0.002, max: 0.2, step: 0.002, unit: "1/m", advanced: true }),
     "air.gustAmount": num({ group: "Air", label: "Gust amount", def: 0.35, min: 0, max: 1, step: 0.01, advanced: true, hint: "Gusts advect downwind rather than pulsing in place." }),
 
