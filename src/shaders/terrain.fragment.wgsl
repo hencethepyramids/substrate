@@ -14,6 +14,7 @@
 #include<substrateSkyData>
 #include<substrateShadow>
 #include<substrateBuffer>
+#include<substrateBrdf>
 
 varying vWorld: vec3f;
 varying vDeriv: vec2f;
@@ -25,8 +26,14 @@ uniform fAlbedo: vec3f;
 uniform fAlbedoCompacted: vec3f;
 uniform fAlbedoSteep: vec3f;
 uniform fParams: vec4f; // x: exposure, y: debug view, z: level count, w: show substrate window
-// x: relief strength. y, z, w are Phase 4 pass B's roughness, subsurface and lobe mix.
+// x: relief strength, y: base roughness, z: subsurface strength, w: dual-lobe mix.
 uniform fSurface: vec4f;
+uniform fSubsurfaceTint: vec3f;
+
+/// Packed material is smoother than the loose material it was made from, so a print in
+/// snow catches a highlight the powder around it does not. One more thing the compaction
+/// channel earns without a new parameter.
+const SB_PACKED_SMOOTH: f32 = 0.6;
 
 const SB_DEBUG_NORMALS: f32 = 1.0;
 const SB_DEBUG_RINGS: f32 = 2.0;
@@ -41,6 +48,9 @@ const SB_DEBUG_SUB_DEPRESSION: f32 = 10.0;
 const SB_DEBUG_SUB_MASS: f32 = 11.0;
 const SB_DEBUG_SUB_COMPACTION: f32 = 12.0;
 const SB_DEBUG_SUB_PHASE: f32 = 13.0;
+const SB_DEBUG_SURF_SPECULAR: f32 = 14.0;
+const SB_DEBUG_SURF_ROUGHNESS: f32 = 15.0;
+const SB_DEBUG_SURF_SUBSURFACE: f32 = 16.0;
 
 /// Full scale for the metric substrate channels, in metres. A 25 cm hollow saturates.
 const SB_SUB_FULL_SCALE: f32 = 0.25;
@@ -114,6 +124,13 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // outcrop around every deep carve.
     let rock = smoothstep(0.16, 0.44, clamp(1.0 - nGeom.y, 0.0, 1.0));
 
+    // Packed material is smoother than the loose material it came from. Compaction is
+    // already driving albedo; this is the same channel doing the other half of the job,
+    // and it is why a fresh print in snow catches a highlight its surroundings do not.
+    let roughness = clamp(uniforms.fSurface.y * mix(1.0, SB_PACKED_SMOOTH, sub.compaction), 0.03, 1.0);
+    // `viewDir` runs camera -> surface, so the eye vector is its negation.
+    let specular = sbSpecularDual(n, -viewDir, l, roughness, uniforms.fSurface.w);
+
     var rgb: vec3f;
 
     if (debug == SB_DEBUG_NORMALS) {
@@ -159,6 +176,20 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // Zero everywhere until Phase 6 drives it. The view exists now so that phase is
         // never the channel nobody looked at.
         rgb = vec3f(0.06) + vec3f(1.0, 0.35, 0.1) * sub.phase;
+    } else if (debug == SB_DEBUG_SURF_SPECULAR) {
+        // The specular lobe alone, no albedo. Sand should show a tight second lobe
+        // riding inside the broad one; snow should not, because its lobe mix is zero.
+        rgb = pow(max(specular * sbSunIrradiance() * shadow * exp2(exposure), vec3f(0.0)), vec3f(1.0 / 2.2));
+    } else if (debug == SB_DEBUG_SURF_ROUGHNESS) {
+        // Black is mirror, white is fully rough. Footprints should read DARKER than the
+        // ground around them — packed material is smoother.
+        rgb = vec3f(roughness);
+    } else if (debug == SB_DEBUG_SURF_SUBSURFACE) {
+        // The light that went through the material and came back out, on its own. It
+        // lives entirely past the terminator, so this should be black in full sun and
+        // brightest on the faces turning away from it.
+        let lit = sbDiffuseSss(vec3f(1.0), rawNdl, uniforms.fSubsurfaceTint, uniforms.fSurface.z);
+        rgb = max(lit - vec3f(max(rawNdl, 0.0)), vec3f(0.0)) * 4.0;
     } else if (debug == SB_DEBUG_AERIAL) {
         // How much of this pixel is air. Should reach roughly 1 at the clipmap edge
         // — anywhere it does not, the terrain's own silhouette is visible against
@@ -172,18 +203,18 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         let ground = mix(uniforms.fAlbedo, uniforms.fAlbedoCompacted, sub.compaction);
         let albedo = mix(ground, uniforms.fAlbedoSteep, rock);
 
-        // Snow does want a wrapped term — light does travel through it — but 0.35 at a
-        // 12 degree sun flattened every dune face into the same value. Phase 4's real
-        // subsurface earns back the softness; until then, definition matters more.
-        let wrap = 0.18;
-        let ndl = clamp((rawNdl + wrap) / (1.0 + wrap), 0.0, 1.0);
+        // The wrapped term is no longer a flat 0.18 with no tint. sbDiffuseSss widens
+        // N·L by the element's own subsurface strength and tints ONLY the light the wrap
+        // adds, because that is the light that actually went through the material.
+        // Both terms are reflected radiance per unit irradiance, so there is still no
+        // stray 1/pi and no ambient constant anywhere. Only the direct term is occluded
+        // — the SH is sky, and the sky is not.
+        var color = sbDiffuseSss(albedo, rawNdl, uniforms.fSubsurfaceTint, uniforms.fSurface.z) * sbSunDiffuse() * shadow + albedo * sbShIrradiance(n);
 
-        // Both terms are already Lambertian reflected radiance per unit albedo, so
-        // there is no stray 1/pi and no ambient constant to tune. The sky and the
-        // bounce arrive together in the SH term, which is the whole point: a north
-        // face under a low sun is lit by a hemisphere of snowfield, not by a number.
-        // Only the direct term is occluded — the SH is sky, and the sky is not.
-        var color = albedo * (sbSunDiffuse() * ndl * shadow + sbShIrradiance(n));
+        // Specular, from the same sun. sbSunIrradiance is the perpendicular irradiance
+        // Phase 2 put in the data texture for exactly this, so the highlight cannot
+        // drift from the sky it is a reflection of.
+        color = color + specular * sbSunIrradiance() * shadow;
 
         // Aerial perspective. Extinction over the path, in-scatter the colour the air
         // in that direction actually is.

@@ -24,7 +24,7 @@ import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
 
 const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
 
-const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS];
+const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", "fSubsurfaceTint", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS];
 
 export class Terrain {
     readonly field: Heightfield;
@@ -45,6 +45,7 @@ export class Terrain {
     private readonly _albedo = new Color3(1, 1, 1);
     private readonly _albedoCompacted = new Color3(1, 1, 1);
     private readonly _albedoSteep = new Color3(0.5, 0.5, 0.5);
+    private readonly _subsurfaceTint = new Color3(1, 1, 1);
     private _element: ElementDef;
     private _rebakeQueued = false;
     private _substrate: Substrate | null = null;
@@ -170,9 +171,10 @@ export class Terrain {
         this._params.set(s["render.exposure"], debugCode(s["debug.view"]), CLIPMAP.levels, s["debug.showSubstrateWindow"] ? 1 : 0);
         m.setVector4("fParams", this._params);
 
-        // y, z, w are Phase 4 pass B's roughness, subsurface strength and lobe mix.
-        this._surface.set(s["sys.substrate"] ? s["substrate.relief"] : 0, 0, 0, 0);
+        const surf = this._element.surface;
+        this._surface.set(s["sys.substrate"] ? s["substrate.relief"] : 0, surf.baseRoughness, surf.subsurfaceStrength, surf.dualLobeMix);
         m.setVector4("fSurface", this._surface);
+        m.setColor3("fSubsurfaceTint", this._subsurfaceTint);
     }
 
     dispose(): void {
@@ -209,6 +211,8 @@ export class Terrain {
         // Steep faces expose the hard material underneath, darkened further. Still a
         // stand-in for a real triplanar rock blend.
         this._albedoSteep.set(c[0] * 0.72, c[1] * 0.72, c[2] * 0.72);
+        const t = def.surface.subsurfaceTint;
+        this._subsurfaceTint.set(t[0], t[1], t[2]);
         if (this._prepared) this._queueRebake();
     }
 

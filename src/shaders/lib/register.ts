@@ -14,6 +14,7 @@ import skyLutTex from "./skyLutTex.wgsl?raw";
 import skyData from "./skyData.wgsl?raw";
 import substrateParams from "./substrateParams.wgsl?raw";
 import substrateBuffer from "./substrateBuffer.wgsl?raw";
+import brdf from "./brdf.wgsl?raw";
 
 /**
  * Registers the shared WGSL includes.
@@ -52,4 +53,7 @@ export function registerShaderIncludes(): void {
     // texture. The relaxation pass writes that texture and must not bind it.
     store["substrateParams"] = substrateParams;
     store["substrateBuffer"] = substrateBuffer;
+    // Declares nothing, binds nothing — pure maths, so anything that shades can include
+    // it. Phase 7's character takes the same lines the terrain does.
+    store["substrateBrdf"] = brdf;
 }

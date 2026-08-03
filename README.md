@@ -48,7 +48,7 @@ between "builds" and "the driver will accept this".
 | 1 — terrain | done |
 | 2 — sky, lighting, atmosphere | done |
 | 3 — substrate buffer | **done** |
-| 4 — surface materials | **pass A landed, pass B next** |
+| 4 — surface materials | **passes A and B landed, C next** |
 | 5 — air | not started |
 | 6 — fire | not started |
 | 7 — character | not started |
@@ -308,12 +308,41 @@ Split three ways, smallest and highest-value first.
 
 `substrate.relief` to 0 is the A/B for all of it.
 
-#### Pass B, the BRDF — next
+**Verified on an RTX Lovelace card.** Both boot probes at 0.01% of a stamp; main pass
+0.34 ms against 0.22 before the phase, for sixteen texture loads per lit pixel inside
+the window and none outside it.
 
-GGX against `baseRoughness`, the dual-lobe blend `dualLobeMix` asks for in sand, and
-snow's depth-dependent subsurface back-scatter off `subsurfaceTint` and
-`subsurfaceStrength`. Then pass C: `glintDensity` and `glintBasis`, the procedural
-sparkle, and `emissiveGain` wired to the heat channel Phase 6 will drive.
+#### Pass B, the BRDF — landed
+
+[brdf.wgsl](src/shaders/lib/brdf.wgsl) is the one reflectance model, and it declares no
+textures and binds nothing — pure maths — so Phase 7's character takes the same lines
+rather than a second opinion about what a highlight looks like.
+
+- **GGX with height-correlated Smith.** The visibility term already carries the
+  `1/(4 N·L N·V)` of the microfacet denominator, so there is no loose 4 anywhere.
+- **Everything returns a factor, never light.** Diffuse pairs with `sbSunDiffuse()`,
+  specular with `sbSunIrradiance()` — which Phase 2 put in the data texture with a
+  comment saying it was for exactly this. The atmosphere stays the single source of how
+  bright anything is.
+- **Dual lobe, because a sand grain has two.** It reflects off its own facet and off the
+  film of fines around it, and those are nothing like the same width. `dualLobeMix` 0
+  collapses to a single lobe exactly, which is what snow asks for.
+- **Subsurface tints only the light that went through the material.** The wrap widens
+  N·L; the *extra* light the wrap adds is the part that travelled, so that part gets
+  `subsurfaceTint` and nothing else does. Snow's is blue because ice absorbs red over a
+  few centimetres of path. This replaces the flat `wrap = 0.18` Phase 1 left behind.
+- **Compaction drives roughness as well as albedo.** Packed material is smoother than
+  the material it was made from, so a print in snow catches a highlight the powder
+  around it does not — a second job for the channel, and no new parameter.
+
+`surface.specular`, `surface.roughness` and `surface.subsurface` are the three views.
+Specular IBL is deliberately absent: there is no prefiltered environment yet, only SH
+irradiance, so a highlight in shadow has nothing to reflect. That wants a Phase 9 LUT.
+
+#### Pass C, glints — next
+
+`glintDensity` and `glintBasis` as procedural sparkle, and `emissiveGain` wired to the
+heat channel Phase 6 will drive.
 
 ### Controls
 

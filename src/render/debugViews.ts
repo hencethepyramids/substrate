@@ -26,6 +26,9 @@ export const DEBUG_CODES: Record<string, number> = {
     "substrate.mass": 11,
     "substrate.compaction": 12,
     "substrate.phase": 13,
+    "surface.specular": 14,
+    "surface.roughness": 15,
+    "surface.subsurface": 16,
 };
 
 export function debugCode(view: string): number {
