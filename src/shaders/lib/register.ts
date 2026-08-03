@@ -12,6 +12,8 @@ import sh from "./sh.wgsl?raw";
 import skyMap from "./skyMap.wgsl?raw";
 import skyLutTex from "./skyLutTex.wgsl?raw";
 import skyData from "./skyData.wgsl?raw";
+import substrateParams from "./substrateParams.wgsl?raw";
+import substrateBuffer from "./substrateBuffer.wgsl?raw";
 
 /**
  * Registers the shared WGSL includes.
@@ -46,4 +48,8 @@ export function registerShaderIncludes(): void {
     store["substrateSkyMap"] = skyMap;
     store["substrateSkyLut"] = skyLutTex;
     store["substrateSkyData"] = skyData;
+    // Same split, same reason: substrateParams is numbers, substrateBuffer declares the
+    // texture. The relaxation pass writes that texture and must not bind it.
+    store["substrateParams"] = substrateParams;
+    store["substrateBuffer"] = substrateBuffer;
 }

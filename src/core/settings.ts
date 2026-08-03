@@ -140,6 +140,16 @@ export const SCHEMA = {
     "shadow.blockerTaps": num({ group: "Shadows", label: "Blocker search taps", def: 12, min: 4, max: 32, step: 4, advanced: true }),
     "shadow.depthRange": num({ group: "Shadows", label: "Caster depth range", def: 200, min: 20, max: 800, step: 10, unit: "m", advanced: true, hint: "How far above a cascade a caster can be and still be included." }),
 
+    // -- Substrate -----------------------------------------------------------
+    // What the ground remembers. The seven numbers that make snow differ from sand
+    // live in elements/registry.ts, not here — these are the window the simulation
+    // runs in and the rate it runs at.
+    "substrate.extent": num({ group: "Substrate", label: "Window size", def: 64, min: 16, max: 256, step: 8, unit: "m", hint: "Square, centred on the camera. Wider covers more ground at coarser texels; the buffer is cleared when this moves." }),
+    "substrate.resolution": num({ group: "Substrate", label: "Window resolution", def: 1024, min: 256, max: 2048, step: 256, hint: "Texels per side. 1024 over 64 m is 6.25 cm — about a bootprint's worth of detail." }),
+    "substrate.relaxRate": num({ group: "Substrate", label: "Relaxation rate", def: 4, min: 0, max: 8, step: 0.1, hint: "Scales slump and diffusion together. 0 freezes the ground without freezing the simulation." }),
+    "substrate.testRadius": num({ group: "Substrate", label: "Test pit radius", def: 0.4, min: 0.1, max: 4, step: 0.05, unit: "m" }),
+    "substrate.testDepth": num({ group: "Substrate", label: "Test pit depth", def: 0.5, min: 0.01, max: 1.5, step: 0.01, unit: "m", hint: "The stamp's steepest face is 0.736 x depth / radius. The default is 43 degrees: past sand's limit, nowhere near snow's." }),
+
     // -- Render --------------------------------------------------------------
     "render.resolutionScale": num({ group: "Render", label: "Resolution scale", def: 1, min: 0.5, max: 2, step: 0.05 }),
     "render.fpsCap": num({ group: "Render", label: "FPS cap", def: 0, min: 0, max: 360, step: 10, hint: "0 = uncapped." }),
@@ -206,11 +216,11 @@ export type SettingListener<K extends SettingKey = SettingKey> = (value: Setting
 
 /**
  * Bumped whenever the schema changes materially. Phase 1 added the Terrain group and
- * new debug views; Phase 2 added the Sky group. More importantly, a stale persisted
- * `ui.overlayOpen: false` from an earlier build would hide the overlay on first run
- * with no obvious way to know why.
+ * new debug views; Phase 2 added the Sky group; Phase 3 added the Substrate group.
+ * More importantly, a stale persisted `ui.overlayOpen: false` from an earlier build
+ * would hide the overlay on first run with no obvious way to know why.
  */
-const STORAGE_KEY = "substrate.settings.v3";
+const STORAGE_KEY = "substrate.settings.v4";
 
 export class Settings {
     /** Direct value access for the hot path: `settings.v["sys.terrain"]`. */

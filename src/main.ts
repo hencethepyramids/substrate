@@ -15,6 +15,7 @@ import { Mover } from "./core/mover";
 import { Sky } from "./render/sky";
 import { Shadows } from "./render/shadows";
 import { Terrain } from "./terrain/terrain";
+import { Substrate } from "./substrate/substrate";
 import { PlaceholderCharacter } from "./character/placeholder";
 import { registerShaderIncludes } from "./shaders/lib/register";
 import { Overlay } from "./ui/overlay";
@@ -54,6 +55,7 @@ async function boot(): Promise<void> {
     let sky!: Sky;
     let shadows!: Shadows;
     let terrain!: Terrain;
+    let substrate!: Substrate;
     let character!: PlaceholderCharacter;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
@@ -81,6 +83,10 @@ async function boot(): Promise<void> {
         sky = new Sky(scene, settings, biome);
         shadows = new Shadows(scene, settings, sky);
         terrain = new Terrain(scene, settings, biome, sky, shadows);
+        // Straight after the terrain and before anything draws: the terrain material
+        // declares the substrate sampler, so the binding has to exist by the first frame.
+        substrate = new Substrate(scene, settings, biome, terrain.field);
+        terrain.setSubstrate(substrate);
         character = new PlaceholderCharacter(scene, settings, sky, shadows);
         shadows.setCasters(terrain.mesh, [character.mesh]);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
@@ -100,6 +106,12 @@ async function boot(): Promise<void> {
         await terrain.prepare(report);
     });
 
+    // After the heightfield, because the relaxation reads it — and because the boot
+    // probe that checks where a carve lands should run against the real field.
+    loader.add("substrate buffer", 2, async (report) => {
+        await substrate.prepare(report);
+    });
+
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
     loader.add("compiling pipelines", 5, async (report) => {
         const characterOk = await compileOrWarn("character", () => character.material.forceCompilationAsync(character.mesh));
@@ -116,11 +128,12 @@ async function boot(): Promise<void> {
         // reports ready so the first visible frame cannot stall.
         for (let attempt = 0; attempt < 180; attempt++) {
             sky.update(rig.camera);
+            substrate.update(rig.camera, 1 / 60);
             terrain.update(rig.camera);
             character.update(rig.camera);
             shadows.update(rig.camera);
             scene.render();
-            if (terrain.ready && sky.ready && shadows.ready && character.isReady() && scene.isReady()) break;
+            if (terrain.ready && sky.ready && shadows.ready && substrate.ready && character.isReady() && scene.isReady()) break;
             await nextFrame();
         }
 
@@ -130,6 +143,7 @@ async function boot(): Promise<void> {
             `[substrate] boot: terrain material ${terrain.compiled ? "ok" : "FAILED"}, ` +
                 `sky ${sky.compiled ? "ok" : "FAILED"}, ` +
                 `shadow cast ${shadows.compiled ? "ok" : "FAILED"}, ` +
+                `substrate relax ${substrate.compiled ? "ok" : "FAILED"}, ` +
                 `character material ${characterOk ? "ok" : "FAILED"}, ` +
                 `height mirror ${terrain.field.mirrorValid ? "ok" : "FAILED"}, ` +
                 `ground at origin ${terrain.field.sampleHeight(0, 0).toFixed(2)} m`,
@@ -140,10 +154,12 @@ async function boot(): Promise<void> {
     loader.add("overlay", 1, () => {
         overlay = new Overlay({ root: stage, settings, perf, gpu, scene, input, biome, capability });
         overlay.addCounter("sky bakes", () => String(sky.bakes));
+        overlay.addCounter("substrate steps", () => String(substrate.steps));
         // Rule 7: register a provider, not a counter. The wrapper is swapped out
         // whenever the atlas is resized, so a cached reference would go stale.
         gpu.register("shadow cascades", () => shadows.gpuTime);
-        registerActions(overlay, settings, mover, rig, terrain);
+        gpu.register("substrate", () => substrate.gpuTime);
+        registerActions(overlay, settings, mover, rig, terrain, substrate);
     });
 
     try {
@@ -163,6 +179,7 @@ async function boot(): Promise<void> {
     const S_GROUND = perf.section("grounding");
     const S_CAMERA = perf.section("camera");
     const S_SKY = perf.section("sky");
+    const S_SUBSTRATE = perf.section("substrate");
     const S_SHADOWS = perf.section("shadow cascades");
     const S_UNIFORMS = perf.section("uniforms");
     const S_RENDER = perf.section("render submit");
@@ -213,6 +230,14 @@ async function boot(): Promise<void> {
         sky.update(rig.camera);
         perf.end(S_SKY);
 
+        // Before the terrain pushes uniforms, for the same reason the sky bakes before
+        // everything: this writes the buffer the beauty pass is about to sample, and it
+        // binds its own render target while doing so. Simulation time, not real time —
+        // the ground freezes when the world is paused.
+        perf.begin(S_SUBSTRATE);
+        substrate.update(rig.camera, simDt);
+        perf.end(S_SUBSTRATE);
+
         perf.begin(S_UNIFORMS);
         terrain.update(rig.camera);
         character.update(rig.camera);
@@ -244,6 +269,7 @@ async function boot(): Promise<void> {
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
         overlay.dispose();
+        substrate.dispose();
         terrain.dispose();
         character.dispose();
         shadows.dispose();
@@ -256,7 +282,7 @@ async function boot(): Promise<void> {
 }
 
 /** Overlay buttons. Phase 10's element interactions register here too. */
-function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, terrain: Terrain): void {
+function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, terrain: Terrain, substrate: Substrate): void {
     overlay.addAction("cycle biome", () => {
         const current = settings.get("world.biome") as BiomeId;
         const next = BIOME_IDS[(BIOME_IDS.indexOf(current) + 1) % BIOME_IDS.length];
@@ -275,6 +301,14 @@ function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig
     });
     overlay.addAction("noon", () => settings.set("world.sunElevation", 68));
     overlay.addAction("golden", () => settings.set("world.sunElevation", 8));
+    // The Phase 3 acceptance test, as one click. Drop the same pit in each biome and
+    // watch it: snow holds a near-vertical wall, sand collapses to its repose angle,
+    // ash collapses and then never recovers. Phase 3's second pass replaces this with
+    // the character's feet and the carve button.
+    overlay.addAction("drop test pit", () => {
+        substrate.stamp(mover.position.x, mover.position.z, settings.v["substrate.testRadius"], settings.v["substrate.testDepth"]);
+    });
+    overlay.addAction("clear substrate", () => substrate.reset());
 }
 
 boot().catch((err) => {

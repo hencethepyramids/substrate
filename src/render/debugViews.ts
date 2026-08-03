@@ -22,6 +22,10 @@ export const DEBUG_CODES: Record<string, number> = {
     "sky.aerial": 7,
     cascades: 8,
     shadowMap: 9,
+    "substrate.depression": 10,
+    "substrate.mass": 11,
+    "substrate.compaction": 12,
+    "substrate.phase": 13,
 };
 
 export function debugCode(view: string): number {

@@ -167,7 +167,7 @@ function checkOrder(where, src) {
         }
     }
     for (const [name, at] of declAt) {
-        if (!/^(sb|sd|sk|SB_|SD_|SK_)/.test(name)) continue;
+        if (!/^(sb|sd|sk|sp|sr|SB_|SD_|SK_|SP_|SR_)/.test(name)) continue;
         const use = new RegExp(`\\b${name}\\b`, "g");
         let m;
         while ((m = use.exec(src)) !== null) {

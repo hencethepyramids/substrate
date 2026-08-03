@@ -40,14 +40,14 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 2 complete
+## Status: Phase 3 in progress
 
 | Phase | State |
 | --- | --- |
 | 0 — harness | done |
 | 1 — terrain | done |
-| 2 — sky, lighting, atmosphere | **done** |
-| 3 — substrate buffer | not started |
+| 2 — sky, lighting, atmosphere | done |
+| 3 — substrate buffer | **pass 1 landed, pass 2 next** |
 | 4 — surface materials | not started |
 | 5 — air | not started |
 | 6 — fire | not started |
@@ -153,7 +153,7 @@ again while the sun is still.
   is. `sky.aerialScale` defaults above 1 only because the clipmap still stops at 870 m
   and haze is doing the work the far-range raymarch will take over in pass B.
 
-### Phase 3 plan, the substrate buffer
+### Phase 3, the substrate buffer
 
 > Carve it, and it holds. Snow keeps a wall, sand collapses at 34 degrees, ash never
 > comes back. One pass, no branch on biome.
@@ -161,30 +161,65 @@ again while the sun is still.
 The hinge of the project: every phase from 4 onward reads this buffer. Split in two,
 for the same reason Phase 2 was — a wrong data layout here is expensive to undo.
 
-**Pass 1, the buffer and the relaxation.** A camera-following window (the
-`debug.showSubstrateWindow` toggle has been waiting since Phase 0), ping-ponged
-between two RGBA32F targets, with one relaxation pass per frame:
+#### Pass 1, the buffer and the relaxation — landed
+
+A camera-following 64 m window at 1024², ping-ponged between two RGBA32F targets,
+one relaxation pass per frame:
 
 | channel | holds |
 | --- | --- |
-| R | depression depth, metres below the heightfield |
-| G | displaced mass, conserved by slump |
+| R | depression depth, metres below the heightfield. Negative is a heap |
+| G | loose mass — the material slump is allowed to move and Phase 5 to lift |
 | B | compaction 0..1 — packed snow, wet sand, crushed ash |
 | A | phase state, which Phase 6 drives with heat |
 
-The pass does slump toward `angleOfRepose`, isotropic `diffusionRate` spreading, and
-`decayHalfLife` recovery, with `cohesion` resisting all three and `slumpAnisotropy`
-biasing berm against floor. Seven numbers, already in `SubstrateParams` since Phase 0,
-consumed by shared code — the architectural test is that desert differs from snow by
-those numbers and nothing else.
+- **The window snaps to its own texel grid.** A frame's scroll is therefore a whole
+  number of texels, so carrying the buffer forward is an integer copy rather than a
+  resample: walking cannot blur what is carved into the ground, and a hollow does not
+  creep across the world while you circle it. `debug.showSubstrateWindow` draws the
+  square, because its edge fades to nothing by design and a window that has stopped
+  following the camera otherwise looks exactly like one that is working.
+- **The gather is conservative, not approximately conservative.** A fragment shader
+  cannot scatter, so each texel computes both its own outflow and every neighbour's
+  inflow to it. `srSlumpFlow` is antisymmetric by construction — both ends of a pair
+  pick the same source, read the same two states, and get the same number with
+  opposite signs. Material cannot leak into the gaps between texels over a few
+  thousand frames.
+- **Slump sees the total surface**, terrain included, and the terrain's contribution
+  comes off the analytic derivative baked in Phase 1 rather than eight more field
+  samples. Over a 6 cm texel that is more faithful than resampling a 50 cm field and
+  it costs three instructions instead of thirty-two texture loads.
+- **Only loose material moves.** That single gate is why undisturbed ground on a 30°
+  dune face does not quietly drain downhill on the first frame the simulation runs.
+- **Six numbers, no branch on biome.** `cohesion` carries `angleOfRepose` the rest of
+  the way toward vertical — snow's 0.82 over 38° holds 78°, sand's 0.02 over 34° holds
+  35°, ash sits just over its own 30° — and the same number resists diffusion.
+  `decayHalfLife` is read exactly as the registry writes it, through `2^(-dt/T)`, so
+  ash's quoted 1e9 seconds means ash never comes back. The buffer is deliberately
+  **not** cleared on a biome switch: carve a pit in snow, switch to desert, and watch
+  the same buffer collapse. That is the architectural test in one click.
+- **The stamp is volume-neutral by construction.** `(1-u²)e^(-u²)` integrates to
+  exactly zero over the plane, so the material a carve pushes down is precisely the
+  material it heaps up, and nothing downstream has to trust a fudge factor. Cohesive
+  material packs instead of displacing, which is the difference between a clean print
+  in snow and a collapsing crater in dry sand.
+- **Where a carve lands is measured, not asserted.** The pass derives a texel from
+  `vUV` and a world position from that texel; the shared include derives a texel from a
+  world position. If those disagree the buffer is perfectly self-consistent and
+  completely wrong, every carve lands mirrored about the window centre, and it moves as
+  the window scrolls. So boot stamps a pit at an asymmetric offset, reads the profile
+  back along an oblique line through it, and compares against a kernel recomputed from
+  scratch on the CPU. Same trick as the height mirror and the sky LUT's v flip, because
+  both of those were this exact bug.
 
-Verified by dropping a test depression in and watching it: snow holds a near-vertical
-wall, sand collapses to 34 degrees, ash sits and never recovers. The four
-`substrate.*` debug views exist for exactly this.
+Try it: **drop test pit**, then the four `substrate.*` debug views.
 
-**Pass 2, writing into it.** The character's feet, then whatever Phase 8 wants. The
-right mouse button has been consuming a carve input since Phase 0 with nothing behind
-it.
+#### Pass 2, writing into it — next
+
+The character's feet, then whatever Phase 8 wants. The right mouse button has been
+consuming a carve input since Phase 0 with nothing behind it. Displacing the geometry
+by the R channel lands with it — until then the buffer is real but the ground is still
+drawn flat, which is why the debug views are the way to see it.
 
 ### Controls
 
@@ -277,6 +312,7 @@ src/
                      capability gate, loading, engine
   elements/          per-element parameter blocks and the material registry
   terrain/           heightfield bake + CPU mirror, clipmap mesh, terrain system
+  substrate/         the ping-ponged substrate buffer and its relaxation pass
   render/            sky, atmosphere and IBL; the shared debug-view codes
   character/         the placeholder capsule, until Phase 7
   shaders/           all WGSL — lib/ holds the shared includes

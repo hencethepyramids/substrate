@@ -10,6 +10,7 @@ import type { BiomeState } from "../core/biome";
 import type { ElementDef } from "../elements/types";
 import { Sky, SKY_UNIFORMS, SKY_SAMPLERS, WORLD_GROUP } from "../render/sky";
 import { Shadows, SHADOW_UNIFORMS, SHADOW_SAMPLERS } from "../render/shadows";
+import { SUBSTRATE_UNIFORMS, SUBSTRATE_SAMPLERS, type Substrate } from "../substrate/substrate";
 import { debugCode } from "../render/debugViews";
 import { Heightfield } from "./heightfield";
 import { buildClipmapMesh, CLIPMAP, type ClipmapStats } from "./clipmapMesh";
@@ -23,7 +24,7 @@ import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
 
 const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
 
-const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoSteep", "fParams", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS];
+const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoSteep", "fParams", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS];
 
 export class Terrain {
     readonly field: Heightfield;
@@ -44,6 +45,7 @@ export class Terrain {
     private readonly _albedoSteep = new Color3(0.5, 0.5, 0.5);
     private _element: ElementDef;
     private _rebakeQueued = false;
+    private _substrate: Substrate | null = null;
 
     constructor(scene: Scene, settings: Settings, biome: BiomeState, sky: Sky, shadows: Shadows) {
         this._settings = settings;
@@ -65,7 +67,7 @@ export class Terrain {
             {
                 attributes: ["position"],
                 uniforms: [...VERTEX_UNIFORMS, ...FRAGMENT_UNIFORMS],
-                samplers: ["sbFieldTex", ...SKY_SAMPLERS, ...SHADOW_SAMPLERS],
+                samplers: ["sbFieldTex", ...SKY_SAMPLERS, ...SHADOW_SAMPLERS, ...SUBSTRATE_SAMPLERS],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
         );
@@ -98,6 +100,17 @@ export class Terrain {
         const queue = () => this._queueRebake();
         this._disposers.push(settings.on("world.seed", queue));
         this._disposers.push(settings.on("world.windBearing", queue));
+    }
+
+    /**
+     * Hand the terrain the substrate buffer. Called from main immediately after the
+     * buffer is constructed — the material declares its sampler either way, so the
+     * binding has to exist before anything draws.
+     */
+    setSubstrate(substrate: Substrate): void {
+        this._substrate = substrate;
+        substrate.bindTo(this.material);
+        substrate.pushTo(this.material);
     }
 
     /** Compiles the pipeline and bakes the field. Runs behind the loading screen. */
@@ -144,8 +157,14 @@ export class Terrain {
         m.setColor3("fAlbedoSteep", this._albedoSteep);
         this._sky.pushTo(m);
         this._shadows.pushTo(m);
+        if (this._substrate !== null) {
+            // Rebound every frame: the buffer ping-pongs, so last frame's front is this
+            // frame's render target and a binding taken once would alias it.
+            this._substrate.bindTo(m);
+            this._substrate.pushTo(m);
+        }
 
-        this._params.set(s["render.exposure"], debugCode(s["debug.view"]), CLIPMAP.levels, 0);
+        this._params.set(s["render.exposure"], debugCode(s["debug.view"]), CLIPMAP.levels, s["debug.showSubstrateWindow"] ? 1 : 0);
         m.setVector4("fParams", this._params);
     }
 
