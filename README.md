@@ -316,6 +316,12 @@ the window and none outside it.
 
 #### Pass B, the BRDF — landed
 
+**Verified on an RTX Lovelace card.** Main pass 0.32–0.41 ms across all three tonemaps,
+so the curve is free; still 3 draw calls. The A/B is decisive: under `none` the glitter
+path on a golden-hour dune is a flat white hole with a hard edge and no information in
+it. Under `agx` the same pixels have structure, and the highlight stays neutral instead
+of shifting hue as it saturates — which is the log-space encode earning its place.
+
 [brdf.wgsl](src/shaders/lib/brdf.wgsl) is the one reflectance model, and it declares no
 textures and binds nothing — pure maths — so Phase 7's character takes the same lines
 rather than a second opinion about what a highlight looks like.
