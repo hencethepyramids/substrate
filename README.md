@@ -42,7 +42,7 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 4 in progress
+## Status: Phase 4 complete
 
 | Phase | State |
 | --- | --- |
@@ -50,7 +50,7 @@ between "builds" and "the driver will accept this".
 | 1 — terrain | done |
 | 2 — sky, lighting, atmosphere | done |
 | 3 — substrate buffer | **done** |
-| 4 — surface materials | **passes A and B landed, C next** |
+| 4 — surface materials | **done** |
 | 5 — air | not started |
 | 6 — fire | not started |
 | 7 — character | not started |
@@ -392,6 +392,12 @@ project looked like before.
 architectural test for that block: albedo, albedoCompacted, baseRoughness,
 subsurfaceTint, subsurfaceStrength, glintDensity, glintBasis, dualLobeMix, emissiveGain.
 No branch on biome anywhere in the surface shader.
+
+**Verified on an RTX Lovelace card.** Main pass 0.34 ms, still 3 draw calls, and
+`surface.glints` shows scattered points rather than the lattice of tiles the first
+version drew. This is the phase where the buffer stops being a debug view: a print in
+fresh snow is a shaded dimple with its own albedo and its own roughness, and the glitter
+path runs behind it.
 
 ### Controls
 
