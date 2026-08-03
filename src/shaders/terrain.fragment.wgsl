@@ -69,10 +69,13 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let dist = length(toEye);
     let viewDir = toEye / max(dist, 1e-4);
 
-    // ONE substrate read, feeding the normal, the albedo and every debug view. Four
-    // texture loads for all of it, and nothing downstream can disagree about what the
-    // ground remembers at this pixel.
+    // ONE substrate read, feeding the normal, the albedo and every debug view. Nothing
+    // downstream can disagree about what the ground remembers at this pixel.
     let sub = sbSubstrateAt(input.vWorld.xz);
+
+    // The geometry normal — the surface the clipmap actually drew, and the only one the
+    // shadow cascades know anything about.
+    let nGeom = normalize(vec3f(-input.vDeriv.x, 1.0, -input.vDeriv.y));
 
     // The buffer lowers the surface, so its slope SUBTRACTS from the terrain's. This is
     // the whole of Phase 4 pass A: the geometry is untouched — a 24 cm print is three
@@ -86,11 +89,18 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let exposure = uniforms.fParams.x;
 
     let l = normalize(uniforms.sbSunDir);
-    let rawNdl = dot(n, l);
     // Sun visibility. Computed once, outside the debug chain, so `cascades` and
     // `shadowMap` show exactly what the beauty path is using rather than a second
     // evaluation that could differ.
-    let shadow = shVisibility(input.vWorld, n, rawNdl, dist);
+    //
+    // THE GEOMETRY NORMAL, NOT THE BENT ONE. shVisibility offsets its lookup along the
+    // normal by a couple of shadow texels — that is what keeps steep slopes free of
+    // acne. The cascades render undisplaced ground and have never heard of a footprint,
+    // so feeding them a normal that swings 30 degrees over 12 cm just scatters the
+    // lookup position and comes back as blocks in the shadowed area. The offset has to
+    // be computed against the surface that was actually rasterised.
+    let shadow = shVisibility(input.vWorld, nGeom, dot(nGeom, l), dist);
+    let rawNdl = dot(n, l);
 
     // Distances are metres here and kilometres in the atmosphere model.
     let transmittance = sbAerial(dist * 0.001);
@@ -101,10 +111,8 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // Off the TERRAIN's own normal, not the one the substrate has bent. The rock blend
     // is about landform — where a hillside is steep enough to shed loose material — and
     // the wall of a 20 cm footprint is not a cliff. Reading it off `n` would paint
-    // outcrop around every deep carve. (n.y for an unnormalised (-dx, 1, -dz) is exactly
-    // this inverse square root, so there is no second normalize here.)
-    let terrainSlope = clamp(1.0 - inverseSqrt(1.0 + dot(input.vDeriv, input.vDeriv)), 0.0, 1.0);
-    let rock = smoothstep(0.16, 0.44, terrainSlope);
+    // outcrop around every deep carve.
+    let rock = smoothstep(0.16, 0.44, clamp(1.0 - nGeom.y, 0.0, 1.0));
 
     var rgb: vec3f;
 
