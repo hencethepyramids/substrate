@@ -62,9 +62,15 @@ export const SKY_UNIFORMS = ["sbSunDir"] as const;
 /** Samplers likewise. Bind them with `sky.bindTo(material)`. */
 export const SKY_SAMPLERS = ["sbSkyLut", "sbSkyData"] as const;
 
-/** Rendering group for the sky. Everything else draws in group 1, over the top. */
-export const SKY_GROUP = 0;
+/**
+ * The sky draws LAST and is depth-tested against the world.
+ *
+ * Drawn first it shaded every pixel the terrain then painted over. Drawn last with
+ * LEQUAL against a depth buffer the world has already written, it runs only on
+ * background pixels — which is what makes a per-pixel far-range march affordable.
+ */
 export const WORLD_GROUP = 1;
+export const SKY_GROUP = 2;
 
 const DEG2RAD = Math.PI / 180;
 
@@ -166,9 +172,9 @@ export class Sky {
             },
         );
         this.material.backFaceCulling = false;
-        // Draw first, pass unconditionally, write no depth. The world then draws over
-        // it with an ordinary depth test against a buffer the sky never touched.
-        this.material.depthFunction = Constants.ALWAYS;
+        // The vertex shader emits z = 1, so LEQUAL passes exactly where the depth
+        // buffer is still at its cleared value and nothing else has been drawn.
+        this.material.depthFunction = Constants.LEQUAL;
         this.material.disableDepthWrite = true;
 
         this.mesh = new Mesh("sky", scene);
@@ -186,10 +192,11 @@ export class Sky {
 
         this._bakeTargets = [this.lut, this.data];
 
-        // The world group must not clear the depth the sky did not write. Babylon
-        // clears depth between rendering groups by default, which here would be a
-        // full-screen clear per frame for no reason at all.
+        // Babylon clears depth between rendering groups by default. The sky now
+        // DEPENDS on the world's depth, so clearing between them would defeat the
+        // arrangement entirely — and it is a full-screen clear per frame either way.
         scene.setRenderingAutoClearDepthStencil(WORLD_GROUP, false, false, false);
+        scene.setRenderingAutoClearDepthStencil(SKY_GROUP, false, false, false);
 
         this.bindTo(this.material);
 
