@@ -12,6 +12,7 @@ import type { BiomeState } from "../core/biome";
 import type { ElementDef } from "../elements/types";
 import { compileOrWarn, nextFrame } from "../core/loading";
 import { debugCode } from "./debugViews";
+import { TERRAIN_PARAM_UNIFORMS, pushTerrainParams } from "../terrain/terrainParams";
 import skyLutBake from "../shaders/skyLutBake.fragment.wgsl?raw";
 import skyDataBake from "../shaders/skyDataBake.fragment.wgsl?raw";
 import skyVertex from "../shaders/sky.vertex.wgsl?raw";
@@ -62,12 +63,14 @@ export const SKY_UNIFORMS = ["sbSunDir"] as const;
 /** Samplers likewise. Bind them with `sky.bindTo(material)`. */
 export const SKY_SAMPLERS = ["sbSkyLut", "sbSkyData"] as const;
 
+/** Rendering group for the sky. Everything else draws in group 1, over the top. */
 /**
- * The sky draws LAST and is depth-tested against the world.
+ * The sky draws LAST, not first, and is depth-tested against the world.
  *
  * Drawn first it shaded every pixel the terrain then painted over. Drawn last with
  * LEQUAL against a depth buffer the world has already written, it runs only on
- * background pixels — which is what makes a per-pixel far-range march affordable.
+ * background pixels — which is the difference between a per-pixel far-range march
+ * being affordable and not.
  */
 export const WORLD_GROUP = 1;
 export const SKY_GROUP = 2;
@@ -111,6 +114,13 @@ export class Sky {
     private readonly _up = new Vector3(0, 1, 0);
     private readonly _forward = new Vector3(0, 0, 1);
     private readonly _params = new Vector4(0, 0, 0, 0);
+    private readonly _far = new Vector4(0, 0, 0, 0);
+    private readonly _albedo = new Vector3(1, 1, 1);
+    private readonly _albedoSteep = new Vector3(1, 1, 1);
+    private readonly _fieldOrigin = new Vector2(0, 0);
+    /** Where the clipmap stops and the march starts. Set by main once terrain exists. */
+    private _farStart = 870;
+    private _fieldExtent = 2048;
     /** Both bake targets take the same atmosphere block; iterated, never rebuilt. */
     private readonly _bakeTargets: ProceduralTexture[];
 
@@ -166,7 +176,7 @@ export class Sky {
             { vertexSource: skyVertex, fragmentSource: skyFragment },
             {
                 attributes: ["position"],
-                uniforms: ["skRight", "skUp", "skForward", "skParams", ...SKY_UNIFORMS],
+                uniforms: ["skRight", "skUp", "skForward", "skParams", "skFar", "skCameraPos", "skAlbedo", "skAlbedoSteep", ...TERRAIN_PARAM_UNIFORMS, ...SKY_UNIFORMS],
                 samplers: [...SKY_SAMPLERS],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
@@ -192,9 +202,9 @@ export class Sky {
 
         this._bakeTargets = [this.lut, this.data];
 
-        // Babylon clears depth between rendering groups by default. The sky now
-        // DEPENDS on the world's depth, so clearing between them would defeat the
-        // arrangement entirely — and it is a full-screen clear per frame either way.
+        // Babylon clears depth between rendering groups by default. The sky depends
+        // on the world's depth, so clearing between them would defeat the whole
+        // arrangement — and it is a full-screen clear per frame either way.
         scene.setRenderingAutoClearDepthStencil(WORLD_GROUP, false, false, false);
         scene.setRenderingAutoClearDepthStencil(SKY_GROUP, false, false, false);
 
@@ -203,12 +213,26 @@ export class Sky {
         this._disposers.push(
             biome.onChange((def) => {
                 this._element = def;
+                const a = def.surface.albedo;
+                this._albedo.set(a[0], a[1], a[2]);
+                const c = def.surface.albedoCompacted;
+                this._albedoSteep.set(c[0] * 0.72, c[1] * 0.72, c[2] * 0.72);
                 this._dirty = true;
             }),
         );
         for (const key of BAKE_KEYS) {
             this._disposers.push(settings.on(key, () => (this._dirty = true)));
         }
+    }
+
+    /**
+     * Tell the sky where the clipmap ends, so the far-range march starts exactly
+     * there — no gap to show sky through, no overlap to shade twice.
+     */
+    setFarStart(radius: number, fieldOriginX: number, fieldOriginZ: number, fieldExtent: number): void {
+        this._farStart = radius;
+        this._fieldOrigin.set(fieldOriginX, fieldOriginZ);
+        this._fieldExtent = fieldExtent;
     }
 
     /** Point a material's sky samplers at these textures. Call once, at construction. */
@@ -327,6 +351,15 @@ export class Sky {
         this._params.set(s["render.exposure"], s["sky.sunDisc"] ? 1 : 0, debugCode(s["debug.view"]), 0);
         m.setVector4("skParams", this._params);
         m.setVector3("sbSunDir", this.sunDir);
+
+        // The far range starts where the clipmap stops, so the two meet with no gap
+        // and no overlap. CLIPMAP_RADIUS is the one number that has to agree.
+        this._far.set(s["sys.farRange"] ? 1 : 0, s["sky.farSteps"], this._farStart, s["sky.farDistance"]);
+        m.setVector4("skFar", this._far);
+        m.setVector3("skCameraPos", camera.globalPosition);
+        m.setVector3("skAlbedo", this._albedo);
+        m.setVector3("skAlbedoSteep", this._albedoSteep);
+        pushTerrainParams(m, this._element, this._settings, this._fieldOrigin, this._fieldExtent);
     }
 
     /** Push the uniforms every lit material shares. Call once per frame, per material. */

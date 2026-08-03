@@ -40,13 +40,13 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 2 — sky, lighting and shadow cascades complete
+## Status: Phase 2 complete
 
 | Phase | State |
 | --- | --- |
 | 0 — harness | done |
 | 1 — terrain | done |
-| 2 — sky, lighting, atmosphere | pass A done; pass B cascades done, far range next |
+| 2 — sky, lighting, atmosphere | **done** |
 | 3 — substrate buffer | not started |
 | 4 — surface materials | not started |
 | 5 — air | not started |

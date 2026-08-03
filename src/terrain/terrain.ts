@@ -71,8 +71,9 @@ export class Terrain {
         );
         // Culling stayed off through Phase 1 and pass A so that a winding mistake
         // could never make the terrain invisible. The cascades settled it: the cast
-        // pass renders front faces only and produces correct shadows, so up-facing IS
-        // front-facing, and the sun and the camera are both above the surface.
+        // pass renders front faces only and produces correct shadows, which means
+        // up-facing IS front-facing, and the sun and the camera are both above the
+        // surface. Safe to stop shading back faces that are never seen.
         this.material.backFaceCulling = true;
         this.material.setTexture("sbFieldTex", this.field.texture);
         sky.bindTo(this.material);

@@ -9,11 +9,20 @@
 #include<substrateSkyLut>
 #include<substrateSh>
 #include<substrateSkyData>
+#include<substrateNoise>
+#include<substrateHeightfield>
+#include<substrateTerrainParams>
+#include<substrateFarField>
 
 varying vRay: vec3f;
 
 // x: exposure EV, y: sun disc on, z: debug view, w: unused
 uniform skParams: vec4f;
+/// x: far range on, y: march steps, z: start distance m, w: far distance m
+uniform skFar: vec4f;
+uniform skCameraPos: vec3f;
+uniform skAlbedo: vec3f;
+uniform skAlbedoSteep: vec3f;
 
 const SK_DEBUG_SKY_IRRADIANCE: f32 = 6.0;
 
@@ -27,6 +36,11 @@ const SK_SUN_SOLID_ANGLE: f32 = 6.807e-5;
 fn main(input: FragmentInputs) -> FragmentOutputs {
     let dir = normalize(input.vRay);
     let raw = sbSkyRaw(dir);
+    // Hoisted, and it has to be. sbHazeColor is a textureSample, textureSample needs
+    // uniform control flow, and whether a far-range ray meets terrain is per-pixel by
+    // definition. Reading it here and using the value inside the branch costs one
+    // fetch on rays that turn out not to need it, which is the price of the rule.
+    let haze = sbHazeColor(dir);
 
     var rgb: vec3f;
 
@@ -40,10 +54,31 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     } else {
         var color = raw.rgb;
 
-        // Ground past the terrain, attenuated by the air between here and there.
-        // a is 0 when the ray never reaches the surface, and full bounce at a = 0 is
-        // exactly right for a ray pointing at the ground under our feet.
-        if (raw.a > 0.0) {
+        // What lies below the horizon. The far-range march replaces the flat bounced
+        // plane with the actual landform, out of the same function the clipmap was
+        // baked from; the plane stays as the fallback for rays that reach the
+        // horizon without meeting ground, and for when the march is switched off.
+        var groundLit = false;
+        if (uniforms.skFar.x > 0.5) {
+            let hit = sbFarMarch(uniforms.skCameraPos, dir, uniforms.skFar.z, uniforms.skFar.w, i32(uniforms.skFar.y), sbTerrainParams());
+            if (hit.hit) {
+                let n = normalize(vec3f(-hit.deriv.x, 1.0, -hit.deriv.y));
+                let rock = smoothstep(0.16, 0.44, clamp(1.0 - n.y, 0.0, 1.0));
+                let albedo = mix(uniforms.skAlbedo, uniforms.skAlbedoSteep, rock);
+
+                let wrap = 0.18;
+                let ndl = clamp((dot(n, uniforms.sbSunDir) + wrap) / (1.0 + wrap), 0.0, 1.0);
+                // No cascades out here — the shadow distance is a few hundred metres
+                // and this starts at 870. Aerial perspective is doing all the work by
+                // this range anyway.
+                let lit = albedo * (sbSunDiffuse() * ndl + sbShIrradiance(n));
+
+                let transmittance = sbAerial(hit.dist * 0.001);
+                color = lit * transmittance + haze * (vec3f(1.0) - transmittance);
+                groundLit = true;
+            }
+        }
+        if (!groundLit && raw.a > 0.0) {
             color = color + sbAerial(raw.a) * sbGroundLight();
         }
 
