@@ -43,9 +43,26 @@ const SR_MAX_DIFF: f32 = 0.24;
 /// diffusionRate is quoted against this cell size, so changing the window resolution
 /// resamples the same physical spreading instead of changing its rate.
 const SR_DIFF_TEXEL: f32 = 0.0625;
-/// Puts the fastest element (ash, 0.46) just under the stability ceiling at the default
-/// window, which is where the fastest element should sit.
-const SR_DIFF_GAIN: f32 = 40.0;
+
+/// SIZED SO THE CEILING ABOVE IS NEVER THE OPERATING POINT.
+///
+/// alpha is proportional to dt, so the pass is frame-rate independent — but only while
+/// it is under SR_MAX_DIFF. The moment it clamps, alpha stops tracking dt and two
+/// things break at once: the spreading rate becomes frame-rate dependent, and every
+/// element fast enough to clamp diffuses identically, so diffusionRate quietly stops
+/// telling desert apart from volcanic. That is the exact failure this project is built
+/// to avoid, and it is invisible on a fast machine — at 238 fps only ash clamps, at
+/// 60 fps both ash and sand do.
+///
+/// So this is solved rather than dialled: the FASTEST element (ash, 0.46, cohesion
+/// 0.008) at the DEFAULT rate (4) must stay under the ceiling at the LONGEST step the
+/// simulation will take (MAX_STEP, 1/30 s, in substrate/substrate.ts):
+///
+///     0.46 * 0.992 * 4 * (1/30) * gain <= 0.20   ->   gain <= 3.29
+///
+/// The relaxRate slider can still push past the ceiling at its extreme, which is fine —
+/// that is a deliberate "go faster" control. The default must never sit there.
+const SR_DIFF_GAIN: f32 = 3.2;
 
 /// Depth at which a raised lip counts as fully berm rather than floor, for the
 /// slumpAnisotropy split.

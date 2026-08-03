@@ -52,6 +52,11 @@ const FADE_TEXELS = 8;
  * Longest step the relaxation is asked to take. The slump limiter is stable well past
  * this, but a 200 ms hitch should not also produce 200 ms of collapse in one frame —
  * the simulation slows down rather than jumping.
+ *
+ * SR_DIFF_GAIN in substrateRelax.fragment.wgsl is sized against this number: it is the
+ * worst step the diffusion coefficient has to stay stable at without clamping. Raise
+ * this and that gain has to come down, or the fastest elements start clamping and stop
+ * being distinguishable from each other.
  */
 const MAX_STEP = 1 / 30;
 
