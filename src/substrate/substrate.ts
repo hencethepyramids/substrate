@@ -237,7 +237,14 @@ export class Substrate {
         this._origin.set(Math.floor((camPos.x - this._extent * 0.5) / texel) * texel, Math.floor((camPos.z - this._extent * 0.5) / texel) * texel);
 
         if (this._windowValid) {
-            this._shift.set(Math.round((this._prevOrigin.x - this._origin.x) / texel), Math.round((this._prevOrigin.y - this._origin.y) / texel));
+            // shift = (new origin - old origin) / texel, because the contract is
+            // `old = new + shift`: texel c of this window sits at
+            //     originNew + (c + 0.5) * texel,
+            // last frame's texel p sat at originPrev + (p + 0.5) * texel, and setting
+            // those equal gives p = c + (originNew - originPrev) / texel. Subtracting
+            // the other way round scrolls the buffer backwards, which moves everything
+            // carved into the ground at twice walking pace.
+            this._shift.set(Math.round((this._origin.x - this._prevOrigin.x) / texel), Math.round((this._origin.y - this._prevOrigin.y) / texel));
         } else {
             this._shift.set(0, 0);
             this._windowValid = true;
@@ -447,15 +454,42 @@ export class Substrate {
         this._render();
 
         try {
-            const data = await this._readProbe(radius);
-            if (!data || data.length < PROBE_WIDTH) {
+            const placed = await this._readProbe(radius);
+            if (!placed || placed.length < PROBE_WIDTH) {
                 console.warn("[substrate] window orientation check skipped: no probe data");
                 return;
             }
-            const error = this._profileError(data, radius, depth);
-            console.info(`[substrate] window orientation: stamp found where it was placed (error ${(error * 100).toFixed(2)}% of depth)`);
-            if (error > 0.05) {
-                console.warn(`[substrate] the relaxation pass and substrateBuffer disagree about where a world position lives in the buffer by ${(error * 100).toFixed(0)}% of a stamp — every carve will land in the wrong place`);
+            const placeError = this._profileError(placed, radius, depth);
+            console.info(`[substrate] window orientation: stamp found where it was placed (error ${(placeError * 100).toFixed(2)}% of depth)`);
+            if (placeError > 0.05) {
+                console.warn(`[substrate] the relaxation pass and substrateBuffer disagree about where a world position lives in the buffer by ${(placeError * 100).toFixed(0)}% of a stamp — every carve will land in the wrong place`);
+            }
+
+            // NOW SCROLL THE WINDOW AND LOOK FOR THE STAMP IN THE SAME PLACE.
+            //
+            // The check above ran on a stationary window and therefore proved only half
+            // of what matters. The other half is that the buffer is world-locked while
+            // the window slides under it — and the sign of that shift shipped inverted,
+            // which sends everything carved into the ground drifting at twice walking
+            // pace. It is obvious the moment anyone walks and completely invisible to a
+            // check that never moves. Eleven texels one way and seven the other, so a
+            // sign error displaces the profile by more than the stamp's own radius and
+            // an axis swap does too.
+            this._prevOrigin.copyFrom(this._origin);
+            this._origin.set(this._origin.x + texel * 11, this._origin.y - texel * 7);
+            this._shift.set(Math.round((this._origin.x - this._prevOrigin.x) / texel), Math.round((this._origin.y - this._prevOrigin.y) / texel));
+            this._stamp.w = 0;
+            this._render();
+
+            const scrolled = await this._readProbe(radius);
+            if (!scrolled || scrolled.length < PROBE_WIDTH) {
+                console.warn("[substrate] window scroll check skipped: no probe data");
+                return;
+            }
+            const scrollError = this._profileError(scrolled, radius, depth);
+            console.info(`[substrate] window scroll: stamp stayed put across an 11 x -7 texel scroll (error ${(scrollError * 100).toFixed(2)}% of depth)`);
+            if (scrollError > 0.05) {
+                console.warn(`[substrate] the buffer is NOT world-locked — a scrolling window drags its contents by ${(scrollError * 100).toFixed(0)}% of a stamp, so anything carved into the ground will slide as you walk`);
             }
         } catch (err) {
             console.warn("[substrate] window orientation check failed:", err);
