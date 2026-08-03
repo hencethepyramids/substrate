@@ -40,14 +40,14 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 3 in progress
+## Status: Phase 3 complete
 
 | Phase | State |
 | --- | --- |
 | 0 — harness | done |
 | 1 — terrain | done |
 | 2 — sky, lighting, atmosphere | done |
-| 3 — substrate buffer | **done, unverified on hardware** |
+| 3 — substrate buffer | **done** |
 | 4 — surface materials | not started |
 | 5 — air | not started |
 | 6 — fire | not started |
@@ -161,7 +161,20 @@ again while the sun is still.
 The hinge of the project: every phase from 4 onward reads this buffer. Split in two,
 for the same reason Phase 2 was — a wrong data layout here is expensive to undo.
 
-#### Pass 1, the buffer and the relaxation — landed
+**Verified on an RTX Lovelace card.** The relaxation is **0.072–0.105 ms** for a full
+1024² pass every frame — about a tenth of the shadow cascades — and the main pass is
+unchanged at 0.22 ms, still 3 draw calls. The carve queue never leaves 0.
+
+The acceptance test, read off `substrate.depression`: **the same test pit, a 43° face,
+in two biomes.** Snow keeps a crisp blue rim around a red pit, because 43° is nowhere
+near its 78° effective limit and nothing moves. Desert loses the rim entirely and the
+pit spreads — which is not decay fading it, it is the rim sliding back into the hollow
+it came out of, because 43° is past sand's 35°. `substrate.compaction` is a tight
+bright disc in snow and nothing anywhere else; `substrate.mass` is the inverse, dim in
+snow and bright in ash, because what packs never becomes loose. Desert erases itself in
+about twenty seconds and volcanic never does.
+
+#### Pass 1, the buffer and the relaxation
 
 A camera-following 64 m window at 1024², ping-ponged between two RGBA32F targets,
 one relaxation pass per frame:
@@ -214,7 +227,16 @@ one relaxation pass per frame:
 
 Try it: **drop test pit**, then the four `substrate.*` debug views.
 
-#### Pass 2, writing into it — landed
+- **A clamped coefficient is where an element parameter goes to die.** The diffusion
+  term shipped pinned against its own explicit-stability ceiling. Once it clamps, the
+  coefficient stops tracking `dt`, so spreading becomes frame-rate dependent *and* every
+  element fast enough to clamp diffuses identically — `diffusionRate` had quietly
+  stopped telling sand apart from ash. It was invisible at 238 fps, where only ash
+  clamped, and broken at 60. The gain is now solved against the longest step the
+  simulation will take rather than dialled by eye. Worth checking every other clamp in
+  the project for the same thing.
+
+#### Pass 2, writing into it
 
 - **Footfalls are phased on ground travelled, not on time.** Stride length is then a
   distance you can measure by walking past your own prints, and it holds at any speed
