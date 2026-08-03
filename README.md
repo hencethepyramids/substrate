@@ -47,7 +47,7 @@ between "builds" and "the driver will accept this".
 | 0 — harness | done |
 | 1 — terrain | done |
 | 2 — sky, lighting, atmosphere | done |
-| 3 — substrate buffer | **pass 1 landed, pass 2 next** |
+| 3 — substrate buffer | **done, unverified on hardware** |
 | 4 — surface materials | not started |
 | 5 — air | not started |
 | 6 — fire | not started |
@@ -214,12 +214,37 @@ one relaxation pass per frame:
 
 Try it: **drop test pit**, then the four `substrate.*` debug views.
 
-#### Pass 2, writing into it — next
+#### Pass 2, writing into it — landed
 
-The character's feet, then whatever Phase 8 wants. The right mouse button has been
-consuming a carve input since Phase 0 with nothing behind it. Displacing the geometry
-by the R channel lands with it — until then the buffer is real but the ground is still
-drawn flat, which is why the debug views are the way to see it.
+- **Footfalls are phased on ground travelled, not on time.** Stride length is then a
+  distance you can measure by walking past your own prints, and it holds at any speed
+  and through any frame rate. It is also the exact contract Phase 7 states for its gait
+  machine, so the prints will not move underfoot when the real legs arrive.
+- **The carve button digs at a rate.** Right mouse, held: depth is metres per second, so
+  how long you hold it decides how deep it goes and the frame rate does not.
+- **One stamp lands per step, so writes queue rather than overwrite.** A footfall and a
+  held carve on the same frame is ordinary, and the second must not silently replace the
+  first. The queue is never deep — a sprint lays a print every ninth frame — and both
+  its depth and any drops are on the overlay, because a backlog that is not visible is a
+  backlog that gets guessed at.
+- **The load is the character's; the response is the element's.** A print is the same
+  call with the same numbers in all three biomes. Snow keeps it for about two minutes,
+  desert erases it in eight seconds, ash keeps it forever. That split is the whole
+  architectural claim, and walking is now the shortest way to check it.
+
+#### Not in Phase 3: displacing the geometry
+
+The clipmap's finest spacing is 8.5 cm and most of the 64 m substrate window is drawn at
+17–68 cm, so a 24 cm footprint is roughly three vertices at best and one at worst.
+Displacing the clipmap by the depression channel would alias the buffer badly and pop
+across the CDLOD morph, and no amount of care in this phase fixes that.
+
+So footprint-scale detail becomes visible in **Phase 4**, through the surface shader —
+normals off the depression gradient, and the compacted albedo the B channel already
+carries. Carves large enough to be real geometry are **Phase 8's** wake, and that will
+need the buffer low-pass filtered per clipmap level before it can be displaced without
+popping. Until then the buffer is real and the ground is still drawn flat, which is why
+the four debug views are the way to see it.
 
 ### Controls
 
@@ -230,7 +255,7 @@ drawn flat, which is why the debug views are the way to see it.
 | shift | sprint |
 | mouse | look |
 | wheel | zoom — writes back into `cam.armLength`, so slider and wheel agree |
-| right mouse | carve (held; consumed in Phase 8) |
+| right mouse | carve — digs at `substrate.carveRate` metres per second, held |
 | `F1` / `` ` `` | overlay |
 | escape | release pointer |
 
@@ -312,7 +337,7 @@ src/
                      capability gate, loading, engine
   elements/          per-element parameter blocks and the material registry
   terrain/           heightfield bake + CPU mirror, clipmap mesh, terrain system
-  substrate/         the ping-ponged substrate buffer and its relaxation pass
+  substrate/         the ping-ponged buffer and its relaxation; what writes into it
   render/            sky, atmosphere and IBL; the shared debug-view codes
   character/         the placeholder capsule, until Phase 7
   shaders/           all WGSL — lib/ holds the shared includes

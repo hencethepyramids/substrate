@@ -16,6 +16,7 @@ import { Sky } from "./render/sky";
 import { Shadows } from "./render/shadows";
 import { Terrain } from "./terrain/terrain";
 import { Substrate } from "./substrate/substrate";
+import { Carve } from "./substrate/carve";
 import { PlaceholderCharacter } from "./character/placeholder";
 import { registerShaderIncludes } from "./shaders/lib/register";
 import { Overlay } from "./ui/overlay";
@@ -61,6 +62,7 @@ async function boot(): Promise<void> {
     let unbindEngine: () => void = () => {};
 
     const mover = new Mover(settings);
+    const carve = new Carve(settings);
 
     loader.add("requesting device", 3, async () => {
         engine = await createEngine(canvas, capability);
@@ -155,11 +157,13 @@ async function boot(): Promise<void> {
         overlay = new Overlay({ root: stage, settings, perf, gpu, scene, input, biome, capability });
         overlay.addCounter("sky bakes", () => String(sky.bakes));
         overlay.addCounter("substrate steps", () => String(substrate.steps));
+        // One stamp lands per step, so a queue that is not draining is real information.
+        overlay.addCounter("carve queue", () => (substrate.dropped > 0 ? `${substrate.pending} (${substrate.dropped} dropped)` : String(substrate.pending)));
         // Rule 7: register a provider, not a counter. The wrapper is swapped out
         // whenever the atlas is resized, so a cached reference would go stale.
         gpu.register("shadow cascades", () => shadows.gpuTime);
         gpu.register("substrate", () => substrate.gpuTime);
-        registerActions(overlay, settings, mover, rig, terrain, substrate);
+        registerActions(overlay, settings, mover, rig, terrain, substrate, carve);
     });
 
     try {
@@ -235,6 +239,8 @@ async function boot(): Promise<void> {
         // binds its own render target while doing so. Simulation time, not real time —
         // the ground freezes when the world is paused.
         perf.begin(S_SUBSTRATE);
+        // Sources first, then the step that consumes them.
+        carve.update(input, mover, substrate, simDt);
         substrate.update(rig.camera, simDt);
         perf.end(S_SUBSTRATE);
 
@@ -282,23 +288,23 @@ async function boot(): Promise<void> {
 }
 
 /** Overlay buttons. Phase 10's element interactions register here too. */
-function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, terrain: Terrain, substrate: Substrate): void {
+function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, terrain: Terrain, substrate: Substrate, carve: Carve): void {
+    const teleport = (x: number, z: number): void => {
+        mover.teleport(x, z);
+        mover.position.y = terrain.field.sampleHeight(x, z);
+        rig.snap();
+        // A jump is not a stride. Without this the gait would lay its next print
+        // wherever the character landed, at a random point in the cycle.
+        carve.resync(mover);
+    };
     overlay.addAction("cycle biome", () => {
         const current = settings.get("world.biome") as BiomeId;
         const next = BIOME_IDS[(BIOME_IDS.indexOf(current) + 1) % BIOME_IDS.length];
         settings.set("world.biome", next);
     });
-    overlay.addAction("origin", () => {
-        mover.teleport(0, 0);
-        mover.position.y = terrain.field.sampleHeight(0, 0);
-        rig.snap();
-    });
-    overlay.addAction("walk 800m", () => {
-        // The Phase 1 acceptance test, as one click.
-        mover.teleport(800, 0);
-        mover.position.y = terrain.field.sampleHeight(800, 0);
-        rig.snap();
-    });
+    overlay.addAction("origin", () => teleport(0, 0));
+    // The Phase 1 acceptance test, as one click.
+    overlay.addAction("walk 800m", () => teleport(800, 0));
     overlay.addAction("noon", () => settings.set("world.sunElevation", 68));
     overlay.addAction("golden", () => settings.set("world.sunElevation", 8));
     // The Phase 3 acceptance test, as one click. Drop the same pit in each biome and
@@ -306,7 +312,7 @@ function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig
     // ash collapses and then never recovers. Phase 3's second pass replaces this with
     // the character's feet and the carve button.
     overlay.addAction("drop test pit", () => {
-        substrate.stamp(mover.position.x, mover.position.z, settings.v["substrate.testRadius"], settings.v["substrate.testDepth"]);
+        substrate.stamp(mover.position.x, mover.position.z, settings.v["substrate.carveRadius"], settings.v["substrate.testDepth"]);
     });
     overlay.addAction("clear substrate", () => substrate.reset());
 }

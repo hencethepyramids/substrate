@@ -59,6 +59,13 @@ const MAX_STEP = 1 / 30;
 const PROBE_WIDTH = 64;
 
 /**
+ * Carves waiting for a step. One lands per frame, and the only source that can outrun
+ * that is a footfall landing on the same frame as a held carve — so this is deep enough
+ * to be irrelevant, and `dropped` says so if it ever is not.
+ */
+const QUEUE_LENGTH = 16;
+
+/**
  * Reads the buffer back through the shared include, along an oblique world line, and
  * reports the world position it read at.
  *
@@ -111,7 +118,10 @@ export class Substrate {
     private readonly _step = new Vector4(0, 0, 1, 0);
     private readonly _stamp = new Vector4(0, 0, 1, 0);
     private readonly _probeCentre = new Vector2(0, 0);
-    private _stampPending = false;
+    /** Ring of (x, z, radius, depth). Preallocated — rule 1 reaches in here every frame. */
+    private readonly _queue = new Float32Array(QUEUE_LENGTH * 4);
+    private _qHead = 0;
+    private _pending = 0;
 
     private _probe: ProceduralTexture | null = null;
 
@@ -212,7 +222,10 @@ export class Substrate {
         const step = Math.min(Math.max(dt, 0), MAX_STEP);
         // Paused means paused: the window stops following too, so unpausing resumes the
         // same square of ground rather than one that scrolled while nothing simulated.
-        if (step <= 0 && !this._stampPending) return;
+        // A queued carve still lands, so the test-pit button works on a paused world.
+        if (step <= 0 && this._pending === 0) return;
+
+        this._dequeue();
 
         const texel = this._extent / this._size;
         const camPos = camera.globalPosition;
@@ -231,15 +244,47 @@ export class Substrate {
     }
 
     /**
-     * Press a pit into the buffer on the next step: a volume-neutral bowl of `depth`
-     * metres over `radius`, with its own rim.
+     * Queue a pit: a volume-neutral bowl of `depth` metres over `radius`, with its own
+     * rim. Negative depth heaps material up instead.
      *
-     * Phase 3's second pass replaces this single stamp with the character's feet and
-     * the carve input that has been consuming a mouse button since Phase 0.
+     * One stamp lands per relaxation step, so this queues rather than overwrites. A
+     * frame that produces both a footfall and a held carve is common and the second one
+     * must not silently replace the first. The queue is never deep in practice — a
+     * sprint at 7.7 m/s lays a print every ninth frame — and `pending` is on the overlay
+     * so a backlog is visible rather than guessed at.
      */
     stamp(x: number, z: number, radius: number, depth: number): void {
-        this._stamp.set(x, z, Math.max(radius, 1e-3), depth);
-        this._stampPending = true;
+        if (depth === 0) return;
+        if (this._pending >= QUEUE_LENGTH) {
+            this.dropped++;
+            return;
+        }
+        const i = ((this._qHead + this._pending) % QUEUE_LENGTH) * 4;
+        this._queue[i] = x;
+        this._queue[i + 1] = z;
+        this._queue[i + 2] = Math.max(radius, 1e-3);
+        this._queue[i + 3] = depth;
+        this._pending++;
+    }
+
+    /** Stamps waiting for a step. */
+    get pending(): number {
+        return this._pending;
+    }
+
+    /** Stamps thrown away because the queue was full. Should stay at zero. */
+    dropped = 0;
+
+    /** Move the next queued stamp into the uniform, or disarm it. */
+    private _dequeue(): void {
+        if (this._pending === 0) {
+            this._stamp.w = 0;
+            return;
+        }
+        const i = this._qHead * 4;
+        this._stamp.set(this._queue[i], this._queue[i + 1], this._queue[i + 2], this._queue[i + 3]);
+        this._qHead = (this._qHead + 1) % QUEUE_LENGTH;
+        this._pending--;
     }
 
     /** Wipe the buffer. The overlay hangs a button off this. */
@@ -308,9 +353,6 @@ export class Substrate {
         const back = this._targets[1 - this._front];
         if (!back.isReady()) return;
 
-        if (!this._stampPending) this._stamp.w = 0;
-        this._stampPending = false;
-
         this._pushConstants(back);
         this._pushFrame(back);
         back.render();
@@ -346,7 +388,8 @@ export class Substrate {
         this._step.set(0, 1, 0, 0);
         this._stamp.set(0, 0, 1, 0);
         this._shift.set(0, 0);
-        this._stampPending = false;
+        this._qHead = 0;
+        this._pending = 0;
         for (const t of this._targets) {
             this._pushConstants(t);
             this._pushFrame(t);
@@ -392,8 +435,9 @@ export class Substrate {
         // Asymmetric in both axes, so a Z flip, an X flip and an axis swap all move the
         // stamp far enough off the probe line to read as an error near 1.
         this._probeCentre.set(this._origin.x + this._extent * 0.68, this._origin.y + this._extent * 0.39);
+        // Straight into the uniform rather than through the queue: this is not a step of
+        // the simulation, it is one stamp with dt = 0 and nothing else.
         this._stamp.set(this._probeCentre.x, this._probeCentre.y, radius, depth);
-        this._stampPending = true;
         this._step.set(0, 0, 0, 0);
         this._render();
 

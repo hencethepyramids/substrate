@@ -147,8 +147,9 @@ export const SCHEMA = {
     "substrate.extent": num({ group: "Substrate", label: "Window size", def: 64, min: 16, max: 256, step: 8, unit: "m", hint: "Square, centred on the camera. Wider covers more ground at coarser texels; the buffer is cleared when this moves." }),
     "substrate.resolution": num({ group: "Substrate", label: "Window resolution", def: 1024, min: 256, max: 2048, step: 256, hint: "Texels per side. 1024 over 64 m is 6.25 cm — about a bootprint's worth of detail." }),
     "substrate.relaxRate": num({ group: "Substrate", label: "Relaxation rate", def: 4, min: 0, max: 8, step: 0.1, hint: "Scales slump and diffusion together. 0 freezes the ground without freezing the simulation." }),
-    "substrate.testRadius": num({ group: "Substrate", label: "Test pit radius", def: 0.4, min: 0.1, max: 4, step: 0.05, unit: "m" }),
-    "substrate.testDepth": num({ group: "Substrate", label: "Test pit depth", def: 0.5, min: 0.01, max: 1.5, step: 0.01, unit: "m", hint: "The stamp's steepest face is 0.736 x depth / radius. The default is 43 degrees: past sand's limit, nowhere near snow's." }),
+    "substrate.carveRadius": num({ group: "Substrate", label: "Carve radius", def: 0.4, min: 0.1, max: 4, step: 0.05, unit: "m", hint: "Shared by the held carve and the test pit." }),
+    "substrate.carveRate": num({ group: "Substrate", label: "Carve rate", def: 1.2, min: 0, max: 6, step: 0.05, unit: "m/s", hint: "Depth per second while right mouse is held, so how long you hold it is what decides how deep it goes." }),
+    "substrate.testDepth": num({ group: "Substrate", label: "Test pit depth", def: 0.5, min: 0.01, max: 1.5, step: 0.01, unit: "m", hint: "One-shot, for the acceptance test. A stamp's steepest face is 0.736 x depth / radius: the default is 43 degrees, past sand's limit and nowhere near snow's." }),
 
     // -- Render --------------------------------------------------------------
     "render.resolutionScale": num({ group: "Render", label: "Resolution scale", def: 1, min: 0.5, max: 2, step: 0.05 }),
@@ -187,6 +188,12 @@ export const SCHEMA = {
     "char.sprintMultiplier": num({ group: "Character", label: "Sprint multiplier", def: 2.4, min: 1, max: 4, step: 0.05 }),
     "char.acceleration": num({ group: "Character", label: "Acceleration", def: 22, min: 2, max: 80, step: 1, unit: "m/s2", advanced: true }),
     "char.turnRate": num({ group: "Character", label: "Turn rate", def: 540, min: 90, max: 1440, step: 10, unit: "deg/s", advanced: true }),
+    // Footfalls into the substrate. Phase 7's gait machine inherits these rather than
+    // replacing them — it phases on distance travelled for the same reason this does.
+    "char.strideLength": num({ group: "Character", label: "Stride length", def: 0.75, min: 0.2, max: 2.5, step: 0.05, unit: "m", hint: "Ground between prints. Phased on distance, not time, so it holds at any speed." }),
+    "char.stanceWidth": num({ group: "Character", label: "Stance width", def: 0.28, min: 0, max: 1, step: 0.01, unit: "m" }),
+    "char.footRadius": num({ group: "Character", label: "Foot radius", def: 0.12, min: 0.02, max: 0.6, step: 0.01, unit: "m" }),
+    "char.footDepth": num({ group: "Character", label: "Foot depth", def: 0.09, min: 0, max: 0.6, step: 0.005, unit: "m", hint: "At walking pace; a run presses harder. The load is the character's, the response is the element's." }),
 
     // -- Debug ---------------------------------------------------------------
     "debug.view": enm({ group: "Debug", label: "Debug view", def: "off", options: DEBUG_VIEWS }),
