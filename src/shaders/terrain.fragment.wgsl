@@ -22,8 +22,11 @@ varying vMorph: f32;
 
 uniform fCameraPos: vec3f;
 uniform fAlbedo: vec3f;
+uniform fAlbedoCompacted: vec3f;
 uniform fAlbedoSteep: vec3f;
 uniform fParams: vec4f; // x: exposure, y: debug view, z: level count, w: show substrate window
+// x: relief strength. y, z, w are Phase 4 pass B's roughness, subsurface and lobe mix.
+uniform fSurface: vec4f;
 
 const SB_DEBUG_NORMALS: f32 = 1.0;
 const SB_DEBUG_RINGS: f32 = 2.0;
@@ -62,11 +65,22 @@ fn sbSignedRamp(v: f32) -> vec3f {
 // of the function.
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
-    let n = normalize(vec3f(-input.vDeriv.x, 1.0, -input.vDeriv.y));
-
     let toEye = input.vWorld - uniforms.fCameraPos;
     let dist = length(toEye);
     let viewDir = toEye / max(dist, 1e-4);
+
+    // ONE substrate read, feeding the normal, the albedo and every debug view. Four
+    // texture loads for all of it, and nothing downstream can disagree about what the
+    // ground remembers at this pixel.
+    let sub = sbSubstrateAt(input.vWorld.xz);
+
+    // The buffer lowers the surface, so its slope SUBTRACTS from the terrain's. This is
+    // the whole of Phase 4 pass A: the geometry is untouched — a 24 cm print is three
+    // clipmap vertices at best — but the surface it describes is not, and light does not
+    // care which of the two it was told about.
+    let relief = uniforms.fSurface.x * sbReliefFade(dist);
+    let deriv = input.vDeriv - sub.slope * relief;
+    let n = normalize(vec3f(-deriv.x, 1.0, -deriv.y));
 
     let debug = uniforms.fParams.y;
     let exposure = uniforms.fParams.x;
@@ -81,10 +95,16 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // Distances are metres here and kilometres in the atmosphere model.
     let transmittance = sbAerial(dist * 0.001);
 
-    // Steep faces expose the hard material underneath. A stand-in for the Phase 4
-    // triplanar blend, but driven by the same slope the real one will use.
-    let slope = clamp(1.0 - n.y, 0.0, 1.0);
-    let rock = smoothstep(0.16, 0.44, slope);
+    // Steep faces expose the hard material underneath. A stand-in for the triplanar
+    // blend, but driven by the same slope the real one will use.
+    //
+    // Off the TERRAIN's own normal, not the one the substrate has bent. The rock blend
+    // is about landform — where a hillside is steep enough to shed loose material — and
+    // the wall of a 20 cm footprint is not a cliff. Reading it off `n` would paint
+    // outcrop around every deep carve. (n.y for an unnormalised (-dx, 1, -dz) is exactly
+    // this inverse square root, so there is no second normalize here.)
+    let terrainSlope = clamp(1.0 - inverseSqrt(1.0 + dot(input.vDeriv, input.vDeriv)), 0.0, 1.0);
+    let rock = smoothstep(0.16, 0.44, terrainSlope);
 
     var rgb: vec3f;
 
@@ -120,24 +140,29 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // its shape and fades over two minutes; in sand the red fills as the blue rim
         // collapses into it and both are gone in seconds; in ash it collapses and then
         // stays exactly as it is.
-        rgb = sbSignedRamp(sbSubstrateAt(input.vWorld.xz).depression);
+        rgb = sbSignedRamp(sub.depression);
     } else if (debug == SB_DEBUG_SUB_MASS) {
         // Loose material. Only what is lit up here is allowed to slump, which is why
         // undisturbed ground on a steep face does not drain downhill.
-        rgb = vec3f(0.06) + vec3f(0.2, 0.9, 0.4) * clamp(sbSubstrateAt(input.vWorld.xz).mass / SB_SUB_FULL_SCALE, 0.0, 1.0);
+        rgb = vec3f(0.06) + vec3f(0.2, 0.9, 0.4) * clamp(sub.mass / SB_SUB_FULL_SCALE, 0.0, 1.0);
     } else if (debug == SB_DEBUG_SUB_COMPACTION) {
-        rgb = vec3f(0.06) + vec3f(0.9, 0.8, 0.35) * sbSubstrateAt(input.vWorld.xz).compaction;
+        rgb = vec3f(0.06) + vec3f(0.9, 0.8, 0.35) * sub.compaction;
     } else if (debug == SB_DEBUG_SUB_PHASE) {
         // Zero everywhere until Phase 6 drives it. The view exists now so that phase is
         // never the channel nobody looked at.
-        rgb = vec3f(0.06) + vec3f(1.0, 0.35, 0.1) * sbSubstrateAt(input.vWorld.xz).phase;
+        rgb = vec3f(0.06) + vec3f(1.0, 0.35, 0.1) * sub.phase;
     } else if (debug == SB_DEBUG_AERIAL) {
         // How much of this pixel is air. Should reach roughly 1 at the clipmap edge
         // — anywhere it does not, the terrain's own silhouette is visible against
         // the sky and Phase 2's far range has work to do.
         rgb = vec3f(1.0) - transmittance;
     } else {
-        let albedo = mix(uniforms.fAlbedo, uniforms.fAlbedoSteep, rock);
+        // Compaction is a DIFFERENT MATERIAL, not a darker one. Packed snow, wet sand
+        // and crushed ash each carry their own albedo in the registry, and this is where
+        // that number finally earns its place: walk over fresh snow and the print you
+        // leave is a different colour, not just a different shape.
+        let ground = mix(uniforms.fAlbedo, uniforms.fAlbedoCompacted, sub.compaction);
+        let albedo = mix(ground, uniforms.fAlbedoSteep, rock);
 
         // Snow does want a wrapped term — light does travel through it — but 0.35 at a
         // 12 degree sun flattened every dune face into the same value. Phase 4's real

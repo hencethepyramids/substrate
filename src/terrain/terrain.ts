@@ -24,7 +24,7 @@ import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
 
 const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
 
-const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoSteep", "fParams", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS];
+const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS];
 
 export class Terrain {
     readonly field: Heightfield;
@@ -41,7 +41,9 @@ export class Terrain {
     private readonly _center = new Vector2(0, 0);
     private readonly _fieldOrigin = new Vector2(0, 0);
     private readonly _params = new Vector4(0, 0, 0, 0);
+    private readonly _surface = new Vector4(0, 0, 0, 0);
     private readonly _albedo = new Color3(1, 1, 1);
+    private readonly _albedoCompacted = new Color3(1, 1, 1);
     private readonly _albedoSteep = new Color3(0.5, 0.5, 0.5);
     private _element: ElementDef;
     private _rebakeQueued = false;
@@ -154,6 +156,7 @@ export class Terrain {
 
         m.setVector3("fCameraPos", camPos);
         m.setColor3("fAlbedo", this._albedo);
+        m.setColor3("fAlbedoCompacted", this._albedoCompacted);
         m.setColor3("fAlbedoSteep", this._albedoSteep);
         this._sky.pushTo(m);
         this._shadows.pushTo(m);
@@ -166,6 +169,10 @@ export class Terrain {
 
         this._params.set(s["render.exposure"], debugCode(s["debug.view"]), CLIPMAP.levels, s["debug.showSubstrateWindow"] ? 1 : 0);
         m.setVector4("fParams", this._params);
+
+        // y, z, w are Phase 4 pass B's roughness, subsurface strength and lobe mix.
+        this._surface.set(s["sys.substrate"] ? s["substrate.relief"] : 0, 0, 0, 0);
+        m.setVector4("fSurface", this._surface);
     }
 
     dispose(): void {
@@ -195,8 +202,12 @@ export class Terrain {
         this._element = def;
         const a = def.surface.albedo;
         this._albedo.set(a[0], a[1], a[2]);
-        // Steep faces expose the compacted material underneath, darkened further.
+        // Phase 4 pass A: albedoCompacted is now consumed as what it says it is — the
+        // colour of packed material — driven by the substrate's compaction channel.
         const c = def.surface.albedoCompacted;
+        this._albedoCompacted.set(c[0], c[1], c[2]);
+        // Steep faces expose the hard material underneath, darkened further. Still a
+        // stand-in for a real triplanar rock blend.
         this._albedoSteep.set(c[0] * 0.72, c[1] * 0.72, c[2] * 0.72);
         if (this._prepared) this._queueRebake();
     }

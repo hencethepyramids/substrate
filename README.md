@@ -40,7 +40,7 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 3 complete
+## Status: Phase 4 in progress
 
 | Phase | State |
 | --- | --- |
@@ -48,7 +48,7 @@ between "builds" and "the driver will accept this".
 | 1 — terrain | done |
 | 2 — sky, lighting, atmosphere | done |
 | 3 — substrate buffer | **done** |
-| 4 — surface materials | not started |
+| 4 — surface materials | **pass A landed, pass B next** |
 | 5 — air | not started |
 | 6 — fire | not started |
 | 7 — character | not started |
@@ -267,6 +267,45 @@ carries. Carves large enough to be real geometry are **Phase 8's** wake, and tha
 need the buffer low-pass filtered per clipmap level before it can be displaced without
 popping. Until then the buffer is real and the ground is still drawn flat, which is why
 the four debug views are the way to see it.
+
+### Phase 4, surface materials
+
+> The substrate stops being a debug view and becomes the picture.
+
+Split three ways, smallest and highest-value first.
+
+#### Pass A, the buffer becomes visible — landed
+
+- **The surface normal comes off the depression gradient, and the gradient is free.** It
+  is the analytic derivative of the *same* interpolation the depression came from, off
+  the *same* four texels — so the normal cannot describe a surface different from the one
+  the buffer describes, and it costs no extra texture reads.
+- **Smoothstep weights, not linear ones.** Plain bilinear is C0: its gradient is constant
+  inside a texel and jumps at the boundary, which turns a footprint into a 6 cm grid of
+  flat facets that crawl as you walk. `u = f²(3-2f)` is C1, and `du/df = 6f(1-f)` carries
+  that into the gradient. Two multiplies.
+- **The geometry is still untouched.** A 24 cm print is three clipmap vertices at best,
+  so nothing is displaced — but light does not care whether it was told about a surface
+  by a vertex or by a normal, and at this scale the normal is the honest channel. It
+  does mean a print shades but does not cast; the cascades see flat ground.
+- **`albedoCompacted` finally means what it says.** The compaction channel blends it
+  against the loose albedo, so a print in fresh snow is a different *colour*, not just a
+  different shape. That number has been sitting in the registry since Phase 0.
+- **The rock blend reads the terrain's own normal, not the bent one.** Outcrop is about
+  landform — where a hillside is steep enough to shed loose material — and the wall of a
+  footprint is not a cliff. Coupling them would paint outcrop around every deep carve.
+- **Relief fades out by the window edge**, because a sub-pixel normal perturbation is not
+  detail, it is aliasing — and fading it where the buffer already ends leaves one
+  boundary in the picture instead of two.
+
+`substrate.relief` to 0 is the A/B for all of it.
+
+#### Pass B, the BRDF — next
+
+GGX against `baseRoughness`, the dual-lobe blend `dualLobeMix` asks for in sand, and
+snow's depth-dependent subsurface back-scatter off `subsurfaceTint` and
+`subsurfaceStrength`. Then pass C: `glintDensity` and `glintBasis`, the procedural
+sparkle, and `emissiveGain` wired to the heat channel Phase 6 will drive.
 
 ### Controls
 
