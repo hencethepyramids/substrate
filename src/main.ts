@@ -83,7 +83,6 @@ async function boot(): Promise<void> {
         terrain = new Terrain(scene, settings, biome, sky, shadows);
         character = new PlaceholderCharacter(scene, settings, sky, shadows);
         shadows.setCasters(terrain.mesh, [character.mesh]);
-        sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
     });
 

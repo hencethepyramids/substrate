@@ -69,12 +69,11 @@ export class Terrain {
                 shaderLanguage: ShaderLanguage.WGSL,
             },
         );
-        // Culling stayed off through Phase 1 and pass A so that a winding mistake
-        // could never make the terrain invisible. The cascades settled it: the cast
-        // pass renders front faces only and produces correct shadows, which means
-        // up-facing IS front-facing, and the sun and the camera are both above the
-        // surface. Safe to stop shading back faces that are never seen.
-        this.material.backFaceCulling = true;
+        // Winding is derived to match Babylon's ground builder, but culling stays off
+        // so a winding mistake cannot make the terrain invisible. Phase 2's second
+        // pass turns it on, when the shadow cascades start to care about facing and
+        // there is a rendered result to check it against in the same sitting.
+        this.material.backFaceCulling = false;
         this.material.setTexture("sbFieldTex", this.field.texture);
         sky.bindTo(this.material);
         shadows.bindTo(this.material);

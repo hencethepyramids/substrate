@@ -123,8 +123,6 @@ export const SCHEMA = {
     "sky.groundBounce": num({ group: "Sky", label: "Ground bounce", def: 1, min: 0, max: 3, step: 0.01, hint: "Multiplies the element's own bounce gain. Drop to 0 to see how much of snow's white is bounce." }),
     "sky.aerialScale": num({ group: "Sky", label: "Aerial perspective", def: 1.5, min: 0, max: 6, step: 0.05, hint: "Scales distance extinction only, not the sky. Above 1 while the clipmap still stops at 870 m." }),
     "sky.sunDisc": bool({ group: "Sky", label: "Sun disc", def: true }),
-    "sky.farSteps": num({ group: "Sky", label: "Far range steps", def: 40, min: 8, max: 160, step: 4, hint: "Raymarch steps per background pixel past the clipmap. The one genuinely expensive number in the sky." }),
-    "sky.farDistance": num({ group: "Sky", label: "Far range", def: 12000, min: 1000, max: 40000, step: 500, unit: "m", hint: "How far the horizon is marched. Beyond this the ray falls back to the bounced plane." }),
     "sky.skyVisibility": num({ group: "Sky", label: "Sky visibility", def: 0.88, min: 0.2, max: 1, step: 0.01, advanced: true, hint: "Fraction of the sky an average ground point sees. Drives the bounce solve." }),
     "sky.steps": num({ group: "Sky", label: "LUT raymarch steps", def: 24, min: 8, max: 64, step: 1, advanced: true, hint: "Per direction, in the sky-view bake. Costs nothing per frame — only per rebake." }),
 

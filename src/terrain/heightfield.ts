@@ -7,7 +7,6 @@ import type { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Settings } from "../core/settings";
 import type { ElementDef } from "../elements/types";
 import { nextFrame } from "../core/loading";
-import { pushTerrainParams } from "./terrainParams";
 import bakeSource from "../shaders/terrainBake.fragment.wgsl?raw";
 
 /**
@@ -246,7 +245,32 @@ export class Heightfield {
     // -- internals -----------------------------------------------------------
 
     private _pushUniforms(tex: ProceduralTexture, element: ElementDef): void {
-        pushTerrainParams(tex, element, this._settings, this._origin, FIELD_EXTENT);
+        const t = element.terrain;
+        const bearing = this._settings.v["world.windBearing"] * (Math.PI / 180);
+
+        tex.setVector2("bkOrigin", this._origin);
+        tex.setFloat("bkExtent", FIELD_EXTENT);
+        tex.setVector2("bkWind", new Vector2(Math.sin(bearing), Math.cos(bearing)));
+        tex.setFloat("bkSeed", this._settings.v["world.seed"]);
+
+        tex.setFloat("bkSwellAmp", t.swellAmp);
+        tex.setFloat("bkSwellFreq", t.swellFreq);
+        tex.setFloat("bkDuneAmp", t.duneAmp);
+        tex.setFloat("bkDuneFreq", t.duneFreq);
+        tex.setFloat("bkDuneStretch", t.duneStretch);
+        tex.setFloat("bkDuneOctaves", t.duneOctaves);
+        tex.setFloat("bkShearAmp", t.shearAmp);
+        tex.setFloat("bkShearFreq", t.shearFreq);
+        tex.setFloat("bkDetailAmp", t.detailAmp);
+        tex.setFloat("bkDetailFreq", t.detailFreq);
+        tex.setFloat("bkDamping", t.damping);
+        tex.setFloat("bkRidgeAmp", t.ridgeAmp);
+        tex.setFloat("bkRidgeFreq", t.ridgeFreq);
+        tex.setFloat("bkOutcropAmp", t.outcropAmp);
+        tex.setFloat("bkOutcropFreq", t.outcropFreq);
+        tex.setFloat("bkOutcropThreshold", t.outcropThreshold);
+        tex.setFloat("bkChannelDepth", t.channelDepth);
+        tex.setFloat("bkChannelFreq", t.channelFreq);
     }
 
     /**
