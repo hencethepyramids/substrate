@@ -616,10 +616,31 @@ work that was done.
   how far it reaches: at 0.28/s it outran the entire 64 m window and read as global fog
   rather than as a plume. 0.6/s is about 21 m at a fresh breeze.
 
-#### Pass E, embers — next
+#### Pass E, embers — landed
 
-`sys.embers` is still reserved with nothing behind it, and it is the first thing in this
-phase that wants geometry rather than a field.
+The first geometry since the clipmap, and built the same way: **the vertex buffer carries
+an index and nothing else.** There is no CPU particle system, no per-frame upload and no
+state — a particle is a pure function of its index and the clock, so the buffer that would
+normally hold positions and lifetimes is replaced by a hash.
+
+**The fire decides which particles are real, not the CPU.** Each ember samples the heat
+where it was born and collapses to a degenerate quad if that spot is cold, which is why
+one static mesh serves a fire of any shape and why this costs one draw call whether the
+world is burning or frozen. It also means a small fire makes few sparks without anyone
+arranging that.
+
+Three mistakes on the way in, and the last is the one worth remembering:
+
+- **`sbHash2` returns a unit vector.** It is the gradient hash Phase 1's noise is built
+  on, so its components are the cosine and sine of one angle and always land on a circle.
+  Using them as a pair of independent coordinates put every ember on a **ring at half the
+  window's width from its centre** — never near any fire, which is why not one of them
+  ever lit. The angle is the uniform quantity; that is the number to take.
+- **Brightness peaked at birth**, which is exactly when an ember is still at ground level
+  and inside the depth buffer's idea of the ground. Every particle drew, and every
+  particle spent its bright moment buried.
+- **Size followed the fade**, so a spark shrank to nothing by the time it had climbed
+  clear of the pool that launched it. It dims as it rises; it does not evaporate.
 
 ### Controls
 

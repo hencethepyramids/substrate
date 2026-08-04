@@ -180,6 +180,10 @@ export const SCHEMA = {
     "smoke.thinning": num({ group: "Fire", label: "Smoke thinning", def: 0.6, min: 0.01, max: 3, step: 0.01, unit: "/s", hint: "Stands in for a plume climbing out of the layer this buffer represents. Material comes back down; smoke does not. Sets the plume's length as much as its density: lifetime times wind speed is how far it reaches, and at 0.28 it outran the whole window and read as global fog." }),
     "smoke.threshold": num({ group: "Fire", label: "Smoke threshold", def: 0.18, min: 0, max: 1, step: 0.01, advanced: true, hint: "Heat below which nothing smokes." }),
     "smoke.density": num({ group: "Fire", label: "Smoke opacity", def: 0.9, min: 0, max: 6, step: 0.05, hint: "How strongly the marched smoke obscures what is behind it." }),
+    "embers.life": num({ group: "Fire", label: "Ember life", def: 2.6, min: 0.2, max: 12, step: 0.1, unit: "s" }),
+    "embers.rise": num({ group: "Fire", label: "Ember rise", def: 1.8, min: 0, max: 12, step: 0.1, unit: "m/s", hint: "Vertical climb. The horizontal drift is the real wind field, so a spark rounds a dune exactly as the plume above it does." }),
+    "embers.size": num({ group: "Fire", label: "Ember size", def: 0.11, min: 0.005, max: 0.5, step: 0.005, unit: "m" }),
+    "embers.threshold": num({ group: "Fire", label: "Ember threshold", def: 0.18, min: 0, max: 1, step: 0.01, advanced: true, hint: "Heat below which no ember is born. The FIRE decides which of the particles are real, not the CPU — which is why the mesh can be static, and also why a small fire makes few sparks without anyone arranging it." }),
     "fire.crust": num({ group: "Fire", label: "Crust", def: 1, min: 0, max: 1, step: 0.01, hint: "How much of the glow is hidden behind cooled plates. 0 is a uniformly molten disc, which is the wrong shape for lava however well its brightness is tuned." }),
     "fire.lightRadius": num({ group: "Fire", label: "Light pool radius", def: 6, min: 0.5, max: 24, step: 0.5, unit: "m" }),
 

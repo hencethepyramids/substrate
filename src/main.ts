@@ -20,6 +20,7 @@ import { Carve } from "./substrate/carve";
 import { AirField } from "./air/airField";
 import { Airborne } from "./air/airborne";
 import { Fire } from "./fire/fire";
+import { Embers } from "./fire/embers";
 import { PlaceholderCharacter } from "./character/placeholder";
 import { registerShaderIncludes } from "./shaders/lib/register";
 import { Overlay } from "./ui/overlay";
@@ -62,6 +63,7 @@ async function boot(): Promise<void> {
     let substrate!: Substrate;
     let airborne!: Airborne;
     let fire!: Fire;
+    let embers!: Embers;
     let character!: PlaceholderCharacter;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
@@ -109,6 +111,7 @@ async function boot(): Promise<void> {
         // They reference each other on purpose: the air reads the ground's loose mass,
         // the ground reads the air's debt, and each sees the other's previous step.
         substrate.setAirborne(airborne);
+        embers = new Embers(scene, settings, biome, terrain.field, substrate, air, fire);
         character = new PlaceholderCharacter(scene, settings, sky, shadows);
         shadows.setCasters(terrain.mesh, [character.mesh]);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
@@ -134,6 +137,7 @@ async function boot(): Promise<void> {
         await substrate.prepare(report);
         await fire.prepare();
         await airborne.prepare();
+        await embers.prepare();
     });
 
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
@@ -155,6 +159,7 @@ async function boot(): Promise<void> {
             substrate.update(rig.camera, 1 / 60);
             airborne.update(1 / 60);
             fire.update(1 / 60);
+            embers.update(rig.camera, 1 / 60);
             terrain.update(rig.camera);
             character.update(rig.camera);
             shadows.update(rig.camera);
@@ -277,6 +282,7 @@ async function boot(): Promise<void> {
         // Heat last: it reads nothing the others write this frame, and the ground picks
         // its phase up next frame.
         fire.update(simDt);
+        embers.update(rig.camera, simDt);
         perf.end(S_SUBSTRATE);
 
         perf.begin(S_UNIFORMS);
@@ -316,6 +322,7 @@ async function boot(): Promise<void> {
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
         overlay.dispose();
+        embers.dispose();
         fire.dispose();
         airborne.dispose();
         substrate.dispose();
