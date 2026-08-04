@@ -196,6 +196,23 @@ export class Skeleton {
         this.dir[i + 2] = z;
     }
 
+    /**
+     * A rest-pose point carried into world space by a bone, exactly as the vertex shader
+     * would carry it.
+     *
+     * This is `skSkinPoint` with one influence, on the CPU, reading the same palette the
+     * GPU reads. The cloth's anchors go through here so that a cape sewn to the back sits
+     * where the back actually is — a second calculation of "where is the upper spine" is
+     * how a cloak ends up floating a hand's width off a shoulder at speed.
+     */
+    worldOf(bone: number, rx: number, ry: number, rz: number, out: Float32Array, at: number): void {
+        const p = bone * 12;
+        const pal = this.palette;
+        out[at] = pal[p] * rx + pal[p + 1] * ry + pal[p + 2] * rz + pal[p + 3];
+        out[at + 1] = pal[p + 4] * rx + pal[p + 5] * ry + pal[p + 6] * rz + pal[p + 7];
+        out[at + 2] = pal[p + 8] * rx + pal[p + 9] * ry + pal[p + 10] * rz + pal[p + 11];
+    }
+
     /** Where a bone's far end has ended up, given its posed head and direction. */
     tailX(bone: number): number {
         return this.head[bone * 3] + this.dir[bone * 3] * this.length[bone];

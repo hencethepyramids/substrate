@@ -33,16 +33,23 @@ uniform fgCameraPos: vec3f;
 
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
-    let n = normalize(input.vNormal);
     let l = normalize(uniforms.sbSunDir);
-
-    let isSkin = step(0.5, input.vMaterial);
-    let albedo = mix(uniforms.fgCloth, uniforms.fgSkin, isSkin);
-    let roughness = mix(uniforms.fgParams.y, uniforms.fgParams.z, isSkin);
 
     let toEye = uniforms.fgCameraPos - input.vWorld;
     let dist = length(toEye);
     let v = toEye / max(dist, 1e-4);
+
+    // TURNED TO FACE THE VIEWER. The figure is a closed surface with back faces culled, so
+    // this never fires for it — but the cloak shares this shader and a sheet of cloth has
+    // two sides, both of which get looked at. Without it the underside of a cape lights
+    // from a normal pointing away from the eye and reads as a black hole in the middle of
+    // a lit garment.
+    let raw = normalize(input.vNormal);
+    let n = select(-raw, raw, dot(raw, v) >= 0.0);
+
+    let isSkin = step(0.5, input.vMaterial);
+    let albedo = mix(uniforms.fgCloth, uniforms.fgSkin, isSkin);
+    let roughness = mix(uniforms.fgParams.y, uniforms.fgParams.z, isSkin);
 
     let rawNdl = dot(n, l);
     let shadow = shVisibility(input.vWorld, n, rawNdl, dist);

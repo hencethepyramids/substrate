@@ -94,6 +94,8 @@ export class Gait {
     /** Smoothed turn rate, rad/s. */
     private _turn = 0;
     private _seeded = false;
+    /** Wall clock for the idle. Simulation seconds, so a pause holds the pose. */
+    private _clock = 0;
 
     // The body this frame, so the leg solve can bring a world-space ankle back into
     // character space without the mover being threaded through every call.
@@ -181,6 +183,7 @@ export class Gait {
         const walk = Math.max(s["char.walkSpeed"], 0.1);
         const speedRatio = mover.speed / walk;
 
+        this._clock += dt;
         this._px = mover.position.x;
         this._py = mover.position.y;
         this._pz = mover.position.z;
@@ -386,8 +389,17 @@ export class Gait {
             cap = Math.min(cap, this._ankleChar[i * 3 + 1] + reach);
         }
 
-        const pelvisY = Math.min(standY - bob, cap);
-        sk.setHead(B.pelvis, sway, pelvisY, 0);
+        // Standing still is not standing rigid. Two slow oscillations at unrelated
+        // periods — breath, and the weight drifting from one foot to the other — which
+        // beat against each other so the figure never repeats a pose. Faded in by the
+        // same `_stand` the settle uses, so it is absent the moment anyone walks and no
+        // second state machine is needed to switch it off.
+        const idle = this._stand;
+        const breath = Math.sin(this._clock * 1.55) * 0.007 * idle;
+        const shift = Math.sin(this._clock * 0.83) * 0.013 * idle;
+
+        const pelvisY = Math.min(standY - bob + breath, cap);
+        sk.setHead(B.pelvis, sway + shift, pelvisY, 0);
         sk.setDir(B.pelvis, leanX, 1, leanZ);
 
         // --- torso, chained head to tail ------------------------------------
@@ -408,8 +420,9 @@ export class Gait {
         const rl = Math.sqrt(1 + leanX * leanX);
         const rightX = 1 / rl;
         const rightY = -leanX / rl;
-        this._leg(B.thighR, B.shinR, B.footR, sway + rightX * P.hipHalf, pelvisY + rightY * P.hipHalf, 0, speedRatio);
-        this._leg(B.thighL, B.shinL, B.footL, sway - rightX * P.hipHalf, pelvisY - rightY * P.hipHalf, 1, speedRatio);
+        const hipMid = sway + shift;
+        this._leg(B.thighR, B.shinR, B.footR, hipMid + rightX * P.hipHalf, pelvisY + rightY * P.hipHalf, 0, speedRatio);
+        this._leg(B.thighL, B.shinL, B.footL, hipMid - rightX * P.hipHalf, pelvisY - rightY * P.hipHalf, 1, speedRatio);
 
         // --- arms -----------------------------------------------------------
         //

@@ -77,7 +77,7 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 6 complete
+## Status: Phase 7 complete
 
 | Phase | State |
 | --- | --- |
@@ -88,7 +88,7 @@ between "builds" and "the driver will accept this".
 | 4 — surface materials | **done** |
 | 5 — air | **done** |
 | 6 — fire | **done** |
-| 7 — character | **passes A–C landed** |
+| 7 — character | **done** |
 | 8 — traversal and wakes | not started |
 | 9 — post | not started |
 | 10 — interactions | not started |
@@ -845,6 +845,64 @@ deep** as a walk while the foot is on it for a quarter as long, which is backwar
 how a real footfall works and is now visible because the character actually stands in it;
 and 11 cm at a walk reads closer to deep snow than to a dusting. Both are `char.footDepth`
 and its load curve, and both are one slider.
+
+#### Pass E, the cloak — landed
+
+A Verlet cloth on the character's back, and **the wind is the same wind**. Not a similar
+one, not a sine: the velocity comes from `sbAirAt` through [airProbe.ts](src/air/airProbe.ts),
+which is the include the smoke plumes and the embers ride. So the cape fills on an exposed
+crest and slackens in the lee of the dune the character has just walked behind, without
+anyone writing a rule that says so, and it agrees with a plume drifting past it because
+they are reading the same function.
+
+`AirField.base` was right there and would have been the easy answer — but it is the
+*ambient* wind, before the terrain has had its say. Measured over a walk, the flow at the
+cloak runs **0.77× to 1.11× the ambient**, with up to 1.1 m/s of vertical. The harness
+prints "terrain IS modulating it" or "FLAT — the probe is echoing the ambient wind",
+because a probe that quietly returned the base vector would look completely correct.
+
+Solved on the CPU, unlike almost everything else here, and deliberately: the cloth has to
+stay off the body, and a capsule collision against the figure's own spine is a few lines
+against a skeleton that already lives on this side of the bus.
+
+**Three bugs, and the measurement found all three.** The stills looked plausible each time.
+
+- **The collision capsule swallowed the seam.** Its radius was 0.20 m and the cloak is
+  sewn 0.125 m behind the spine, so every particle below the pinned row was ejected 10 cm
+  backwards on every substep while the row above it was pinned. The top edge fought the
+  pins for ever and stretched **76%** past its rest length. The cape came out crumpled onto
+  one shoulder, which reads exactly like a solver that has simply diverged. A collision
+  radius has to be smaller than the offset the thing is attached at.
+- **The body walked out from under the cloth.** The seam is pinned to a body moving at
+  3.2 m/s and the rest length between rows is 6.8 cm, so the anchor jumped 40% of an edge
+  per substep and the entire strain landed on row 0 — a median **28%** stretch and peaks
+  over **400%**, always on the same edge. Relaxation cannot fix it: Gauss-Seidel propagates
+  one row per iteration, so the correction is still crawling down the sheet when the next
+  substep pulls the seam away again. The fix is to carry every particle along with the
+  seam — position and previous position both, so velocity is untouched — which moves the
+  solve into the body's frame where it only ever sees the residual. **1.3% after.**
+- **And that fix silently deleted the apparent wind.** In the body's frame a particle
+  resting against the back has zero velocity even at a full sprint, so the drag term saw
+  only the ambient breeze and a running cape hung dead straight. It looked like stiff
+  cloth and was actually a missing term. The frame's own velocity goes back in at the
+  aerodynamics and nowhere else.
+
+Two things that are tuning rather than bugs, recorded because both looked like solver
+failures first: fourteen relaxation iterations with a 0.25 bend constraint produced a
+**rigid dark rectangle** — a solver doing exactly what it was told and cloth doing nothing
+anyone would recognise; and the first drag coefficient was about three times too strong,
+which is a flag rather than a cape.
+
+Measured, walking and sprinting: cloth edge stretch p50 **1.3% / 6.2%**, p99 2.8% / 7.5%.
+`checkGait.mjs` now samples this **every frame** rather than once at the end — the settled
+cloth read 1.7% while the walking cloth was at 28%, so an end-of-run sample would have
+called all of this fine.
+
+The figure also stopped standing perfectly rigid: two slow oscillations at unrelated
+periods — breath, and weight drifting between the feet — faded in by the same `_stand` the
+settle already uses, so it is absent the moment anyone walks and needs no second state.
+
+5 draw calls, up from 4.
 
 ### Controls
 

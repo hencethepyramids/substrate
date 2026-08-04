@@ -19,11 +19,13 @@ import { Substrate } from "./substrate/substrate";
 import { Carve } from "./substrate/carve";
 import { GroundProbe } from "./substrate/groundProbe";
 import { AirField } from "./air/airField";
+import { AirProbe } from "./air/airProbe";
 import { Airborne } from "./air/airborne";
 import { Fire } from "./fire/fire";
 import { Embers } from "./fire/embers";
 import { Gait } from "./character/gait";
 import { Figure } from "./character/figure";
+import { Cloak } from "./character/cloak";
 import { registerShaderIncludes } from "./shaders/lib/register";
 import { Overlay } from "./ui/overlay";
 import { BIOME_IDS } from "./elements/registry";
@@ -69,6 +71,8 @@ async function boot(): Promise<void> {
     let character!: Figure;
     let gait!: Gait;
     let groundProbe!: GroundProbe;
+    let airProbe!: AirProbe;
+    let cloak!: Cloak;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
 
@@ -125,9 +129,13 @@ async function boot(): Promise<void> {
         groundProbe = new GroundProbe(scene, settings, substrate);
         gait.setProbe(groundProbe);
         character = new Figure(scene, settings, sky, shadows, gait);
-        // Skinned cast, not the shared world-transform one — the figure has no world
-        // matrix for that material to read.
-        shadows.setCasters(terrain.mesh, [{ mesh: character.mesh, material: character.castMaterial }]);
+        // The wind where the character is, read through the same include the smoke uses.
+        airProbe = new AirProbe(scene, settings, terrain.field, air);
+        cloak = new Cloak(scene, settings, sky, shadows, gait, airProbe);
+        // The figure needs the skinned cast — it has no world matrix for the shared one to
+        // read. The cloak is the opposite: its solver already works in world space, so the
+        // shared pass multiplying by an identity world matrix is exactly right.
+        shadows.setCasters(terrain.mesh, [{ mesh: character.mesh, material: character.castMaterial }, { mesh: cloak.mesh }]);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);
@@ -164,6 +172,7 @@ async function boot(): Promise<void> {
         gait.resync(mover);
         gait.update(mover, 0);
         await character.prepare();
+        await cloak.prepare();
         report(0.3);
         await shadows.prepare();
         report(0.5);
@@ -181,9 +190,10 @@ async function boot(): Promise<void> {
             embers.update(rig.camera, 1 / 60);
             terrain.update(rig.camera);
             character.update(rig.camera);
+            cloak.update(rig.camera, 1 / 60);
             shadows.update(rig.camera);
             scene.render();
-            if (terrain.ready && sky.ready && shadows.ready && substrate.ready && character.ready && scene.isReady()) break;
+            if (terrain.ready && sky.ready && shadows.ready && substrate.ready && character.ready && cloak.ready && scene.isReady()) break;
             await nextFrame();
         }
 
@@ -195,6 +205,7 @@ async function boot(): Promise<void> {
                 `shadow cast ${shadows.compiled ? "ok" : "FAILED"}, ` +
                 `substrate relax ${substrate.compiled ? "ok" : "FAILED"}, ` +
                 `character material ${character.compiled ? "ok" : "FAILED"}, ` +
+                `cloak ${cloak.compiled ? "ok" : "FAILED"}, ` +
                 `height mirror ${terrain.field.mirrorValid ? "ok" : "FAILED"}, ` +
                 `ground at origin ${terrain.field.sampleHeight(0, 0).toFixed(2)} m`,
         );
@@ -303,6 +314,8 @@ async function boot(): Promise<void> {
         // the freshest one there is. The readback is asynchronous and self-throttling: it
         // costs the character a frame or two of latency and costs the frame nothing.
         groundProbe.update(mover.position.x, mover.position.z);
+        // The wind where the character is. One texel, same include as the smoke.
+        airProbe.update(mover.position.x, mover.position.z);
         // After the ground: it reads the mass the substrate has just finished writing,
         // on that pass's own window.
         airborne.update(simDt);
@@ -315,6 +328,8 @@ async function boot(): Promise<void> {
         perf.begin(S_UNIFORMS);
         terrain.update(rig.camera);
         character.update(rig.camera);
+        // After the figure, because the cloak hangs off the palette the figure just baked.
+        cloak.update(rig.camera, simDt);
         perf.end(S_UNIFORMS);
 
         // Fit and render the cascades before scene.render() samples them. terrain
@@ -344,7 +359,7 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
@@ -354,6 +369,8 @@ async function boot(): Promise<void> {
         airborne.dispose();
         substrate.dispose();
         terrain.dispose();
+        cloak.dispose();
+        airProbe.dispose();
         character.dispose();
         groundProbe.dispose();
         shadows.dispose();

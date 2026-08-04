@@ -49,3 +49,11 @@ Pass C put the character on the ground it carves.
   inside its own print with the rim of it visible around the boot. Before this pass the
   foot stood at the original ground height and the print was drawn below it.
 - `phase7-ground-desert.png` — desert, sun 16, walking.
+
+Pass E hung a cloth on the back, driven by the air field.
+
+- `phase7-cloak-snow.png` — snow, sun 22, walking. The cape hanging and swaying on the
+  default breeze.
+- `phase7-cloak-desert.png` — desert, sun 15, wind 0.62, walking. The same cloth in a
+  real wind: swept across the body and lifted, on the velocity field that carved the
+  dunes behind it.

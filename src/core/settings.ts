@@ -244,6 +244,15 @@ export const SCHEMA = {
     "char.skinRoughness": num({ group: "Character", label: "Skin roughness", def: 0.44, min: 0.04, max: 1, step: 0.01, advanced: true }),
     "char.subsurface": num({ group: "Character", label: "Subsurface", def: 0.35, min: 0, max: 1, step: 0.01, advanced: true, hint: "Wrapped light through the surface, tinted the way blood tints it." }),
 
+    // -- Cloth ---------------------------------------------------------------
+    // The cloak, on the same wind that carves the dunes and carries the smoke.
+    "cloth.drag": num({ group: "Cloth", label: "Wind drag", def: 1.6, min: 0, max: 20, step: 0.1, hint: "How hard the air pushes on the sheet. Applied along the surface normal, which is why cloth fills instead of being shoved." }),
+    "cloth.damping": num({ group: "Cloth", label: "Damping", def: 1.6, min: 0, max: 12, step: 0.05, unit: "1/s" }),
+    "cloth.iterations": num({ group: "Cloth", label: "Solver iterations", def: 8, min: 1, max: 16, step: 1, advanced: true, hint: "Constraint passes per substep. More is stiffer, not more accurate." }),
+    "cloth.width": num({ group: "Cloth", label: "Width", def: 0.38, min: 0.1, max: 1.2, step: 0.02, unit: "m", advanced: true, hint: "Read once, at construction." }),
+    "cloth.length": num({ group: "Cloth", label: "Length", def: 0.82, min: 0.2, max: 1.6, step: 0.02, unit: "m", advanced: true, hint: "Read once, at construction." }),
+    "cloth.subsurface": num({ group: "Cloth", label: "Subsurface", def: 0.4, min: 0, max: 1, step: 0.01, advanced: true, hint: "Cloth is thin, so a good deal of light comes through the far side of it." }),
+
     // -- Debug ---------------------------------------------------------------
     "debug.view": enm({ group: "Debug", label: "Debug view", def: "off", options: DEBUG_VIEWS }),
     "debug.wireframe": bool({ group: "Debug", label: "Wireframe", def: false }),

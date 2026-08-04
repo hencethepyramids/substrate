@@ -123,6 +123,26 @@ await page.evaluate(() => {
             duty: app.gait.duty,
             facing: app.mover.facing,
             stand: app.gait.standing,
+            // Cloth stretch EVERY FRAME, not once at the end. A solver that is losing it
+            // does so while the anchors are moving fastest, which is exactly the instant a
+            // single end-of-run sample is least likely to catch.
+            stretch: (() => {
+                const c = app.cloak;
+                const COLS = 9, ROWS = 13, q = c._pos;
+                const dd = (a, b) => Math.hypot(q[a] - q[b], q[a+1] - q[b+1], q[a+2] - q[b+2]);
+                let w = 0;
+                for (let r = 0; r < ROWS; r++) for (let k = 0; k < COLS; k++) {
+                    const i = (r * COLS + k) * 3;
+                    if (r + 1 < ROWS) w = Math.max(w, Math.abs(dd(i, i + COLS * 3) / c._restRow - 1));
+                    if (k + 1 < COLS) w = Math.max(w, Math.abs(dd(i, i + 3) / c._restCol - 1));
+                }
+                return w;
+            })(),
+            // The wind the CLOTH is reading, against the ambient it is modulated from.
+            // If these never differ, the probe is echoing the base wind and the whole
+            // point of sampling through sbAirAt is lost.
+            wind: [app.airProbe.velocity.x, app.airProbe.velocity.y, app.airProbe.vertical],
+            base: [app.air.base.x, app.air.base.y],
         });
         // Turn the rig at a controlled rate. Driven directly rather than through lookX
         // because the thing under test is the GAIT under a turn, not the look input, and
@@ -172,6 +192,28 @@ const result = await page.evaluate(() => {
         stance: app.settings.get("char.stanceWidth"),
         walkSpeed: app.settings.get("char.walkSpeed"),
         probeLatency: app.groundProbe.latencyMs,
+        // The cloth, measured against its own rest lengths. A Verlet solver that is not
+        // converging shows up here long before it shows up as anything you would notice
+        // in a still — and the first version of this cloak was 76% stretched along its
+        // top edge while looking merely a bit crumpled.
+        cloth: (() => {
+            const c = app.cloak;
+            const COLS = 9;
+            const ROWS = 13;
+            const pos = c._pos;
+            const at = (r, k) => { const i = (r * COLS + k) * 3; return [pos[i], pos[i + 1], pos[i + 2]]; };
+            const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+            let worst = 0;
+            let hang = 0;
+            for (let r = 0; r < ROWS; r++) {
+                for (let k = 0; k < COLS; k++) {
+                    if (r + 1 < ROWS) worst = Math.max(worst, Math.abs(d(at(r, k), at(r + 1, k)) / c._restRow - 1));
+                    if (k + 1 < COLS) worst = Math.max(worst, Math.abs(d(at(r, k), at(r, k + 1)) / c._restCol - 1));
+                }
+            }
+            for (let r = 0; r < ROWS - 1; r++) hang += d(at(r, 4), at(r + 1, 4));
+            return { worst, hang, ideal: c._restRow * (ROWS - 1) };
+        })(),
         // Ground height under each recorded stamp, so a print can be checked against the
         // surface rather than against the body's own idea of where it is.
         stampGround: window.__stamps.map((s) => app.terrain.field.sampleHeight(s.x, s.z)),
@@ -180,7 +222,7 @@ const result = await page.evaluate(() => {
 
 await browser.close();
 
-const { log, stamps, stride, stance, walkSpeed, probeLatency } = result;
+const { log, stamps, stride, stance, walkSpeed, probeLatency, cloth } = result;
 if (log.length < 30) {
     console.error(`only ${log.length} frames captured — did the page run?`);
     process.exit(1);
@@ -365,6 +407,17 @@ const medianRaw = rawClears[Math.floor(rawClears.length / 2)] ?? 0;
 console.log(`  vs the UNDISTURBED heightfield  ${pct(-medianRaw)} below it  <- where the foot would have floated`);
 console.log(`  deepest print stood in          ${pct(deepestPrint)}`);
 console.log(`  ground probe round trip         ${probeLatency.toFixed(1)} ms  <- the age of what it is standing on`);
+{
+    const ratios = log.filter((f) => Math.hypot(f.base[0], f.base[1]) > 0.01).map((f) => Math.hypot(f.wind[0], f.wind[1]) / Math.hypot(f.base[0], f.base[1]));
+    if (ratios.length > 0) {
+        ratios.sort((a, b) => a - b);
+        const lo = ratios[Math.floor(ratios.length * 0.05)];
+        const hi = ratios[Math.floor(ratios.length * 0.95)];
+        const vert = Math.max(...log.map((f) => Math.abs(f.wind[2])));
+        console.log(`  wind at the cloak / ambient     ${lo.toFixed(2)} to ${hi.toFixed(2)} over the walk, vertical up to ${vert.toFixed(2)} m/s`);
+        console.log(`     ${hi - lo > 0.05 ? "terrain IS modulating it" : "FLAT — the probe is echoing the ambient wind"}`);
+    }
+}
 if (errors.length > 0) console.log(`page errors: ${errors.join(" | ")}`);
 
 // A planted foot may move by the numerical noise of the terrain sample under it and no
@@ -379,13 +432,26 @@ const groundOk = lq(0.9) < 0.025 && worstSink < 0.05;
 // The point of pass C: the foot must be on the DRAWN surface, and that has to be a
 // different surface from the undisturbed one, or the run carved nothing and proved
 // nothing. Snow at the default foot depth prints about 5 cm.
+// Only while actually walking, which also drops the first frames after boot where dt is
+// enormous and the accumulator clamps.
+const walking = log.filter((f) => f.speed > 0.5);
+const stretches = walking.map((f) => f.stretch).sort((a, b) => a - b);
+const worstStretchAt = log.reduce((a, f, i) => (f.stretch > log[a].stretch ? i : a), 0);
+console.log(`  worst stretch frame             #${worstStretchAt} of ${log.length}, speed ${log[worstStretchAt].speed.toFixed(2)} m/s, ${((log[worstStretchAt].t - log[0].t) / 1000).toFixed(2)} s in`);
+const stretchP99 = stretches[Math.floor(stretches.length * 0.99)] ?? 0;
 const printOk2 = deepestPrint > 0.015;
+// A cloth solver that is converging keeps every edge within a few percent of its rest
+// length. Ten percent is loose; the failure this catches was seventy-six.
+const clothOk = stretchP99 < 0.08;
 
 console.log("");
+console.log(`  cloth edge stretch              p50 ${(stretches[Math.floor(stretches.length / 2)] * 100).toFixed(1)}%, p99 ${(stretchP99 * 100).toFixed(1)}%, peak ${(stretches[stretches.length - 1] * 100).toFixed(1)}%`);
+console.log(`  cloth hanging                   ${cloth.hang.toFixed(3)} m of ${cloth.ideal.toFixed(3)} m`);
 console.log(`planted foot holds     ${slideOk ? "PASS" : "FAIL"}`);
 console.log(`prints under the feet  ${printOk ? "PASS" : "FAIL"}`);
 console.log(`stride is the setting  ${strideOk ? "PASS" : "FAIL"}`);
 console.log(`stands on the surface  ${groundOk ? "PASS" : "FAIL"}`);
 console.log(`stands in its own print ${printOk2 ? "PASS" : "FAIL"}`);
+console.log(`cloth is converging     ${clothOk ? "PASS" : "FAIL"}`);
 
-process.exit(slideOk && printOk && strideOk && groundOk && printOk2 ? 0 : 1);
+process.exit(slideOk && printOk && strideOk && groundOk && printOk2 && clothOk ? 0 : 1);
