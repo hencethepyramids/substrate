@@ -826,6 +826,14 @@ two surfaces apart:
 | ground probe round trip | 14.1 ms | 9.2 ms |
 | of contact spent settling | 3.2% | 29.1% |
 
+**Turning was measured too, and it is fine.** The worry was that a body whose facing keeps
+rotating would wind away from feet that are pinned in world space. It does not: walking a
+full circle at 42 deg/s and two and a half circles at 113 deg/s leaves stance drift at
+0.0 cm and every other claim unchanged, because the swing foot re-predicts its landing
+every frame and therefore steers into the turn while the planted one holds. `--turn` in
+the harness is what settled it. **This is why there is no pass D** — the pass that was
+pencilled in to fix pivoting had nothing to fix.
+
 **The sprint number is the honest cost and it was measured, not guessed.** The readback is
 about one and a half frames old, which is 5% of a walking stance and 20% of a sprinting
 one — so at a sprint the foot spends the first third of each contact catching up with a

@@ -30,6 +30,9 @@ for (const a of process.argv.slice(2)) {
 }
 const seconds = Number(argv.get("seconds") ?? 6);
 const sprint = argv.get("sprint") === "true";
+// Look input per frame, to walk a circle. The mouse feeds exactly this field, so from
+// here on it is the shipping path — a turn driven by poking the rig would not be.
+const turn = (Number(argv.get("turn") ?? 0) * Math.PI) / 180;
 
 function findChromium() {
     if (process.env.SUBSTRATE_CHROME) return process.env.SUBSTRATE_CHROME;
@@ -118,8 +121,18 @@ await page.evaluate(() => {
             pr: app.gait.phaseOf(0),
             pl: app.gait.phaseOf(1),
             duty: app.gait.duty,
+            facing: app.mover.facing,
             stand: app.gait.standing,
         });
+        // Turn the rig at a controlled rate. Driven directly rather than through lookX
+        // because the thing under test is the GAIT under a turn, not the look input, and
+        // the frame ordering swallows most of what an out-of-loop injection adds.
+        if (window.__turn) {
+            const now = performance.now();
+            const dt = window.__turnAt ? (now - window.__turnAt) / 1000 : 0;
+            window.__turnAt = now;
+            app.rig.yaw += window.__turn * dt;
+        }
         window.__gaitRaf = requestAnimationFrame(sample);
     };
     sample();
@@ -136,6 +149,12 @@ await page.evaluate(() => {
     };
 });
 
+await page.evaluate((t) => {
+    window.__turn = t;
+    // The look path is gated on pointer lock, which a headless run never gets. Everything
+    // downstream of this flag is the shipping path.
+
+}, turn);
 await page.keyboard.down("w");
 if (sprint) await page.keyboard.down("Shift");
 await page.waitForTimeout(seconds * 1000);
@@ -321,6 +340,17 @@ const measured = gaps[Math.floor(gaps.length * 0.5)] ?? 0;
 const pct = (v) => `${(v * 100).toFixed(1)} cm`;
 console.log(`frames            ${log.length}  (${contacts.length} contacts, ${stanceFrames} foot-frames in stance)`);
 console.log(`walked            ${travelled.toFixed(2)} m at up to ${Math.max(...log.map((f) => f.speed)).toFixed(2)} m/s (walk ${walkSpeed})`);
+if (turn !== 0) {
+    let swept = 0;
+    for (let i = 1; i < log.length; i++) {
+        let d = log[i].facing - log[i - 1].facing;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        swept += d;
+    }
+    const secs = (log[log.length - 1].t - log[0].t) / 1000;
+    console.log(`turned            ${((swept * 180) / Math.PI).toFixed(0)} deg total, ${((swept * 180) / Math.PI / secs).toFixed(0)} deg/s average`);
+}
 console.log("");
 console.log(`stance drift worst ${pct(worstSlide)}   ${worst.foot} foot, frame ${worstAt}, ${worst.n} frames`);
 console.log(`stance drift p50/p90 ${pct(p(0.5))} / ${pct(p(0.9))}`);
