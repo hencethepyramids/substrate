@@ -88,7 +88,7 @@ between "builds" and "the driver will accept this".
 | 4 — surface materials | **done** |
 | 5 — air | **done** |
 | 6 — fire | **done** |
-| 7 — character | **pass A landed** |
+| 7 — character | **passes A–B landed** |
 | 8 — traversal and wakes | not started |
 | 9 — post | not started |
 | 10 — interactions | not started |
@@ -728,6 +728,43 @@ the palette and the solve are already what they will be.
 
 Still 4 draw calls: the figure replaced the capsule rather than adding to it.
 
+#### Pass B, the loft — landed
+
+Rings of vertices swept along chains of bones, with an **elliptical** cross-section whose
+two radii come from a small table per chain. A body is wider than it is deep almost
+everywhere and the ratio changes down its length, so one radius per ring gives a bundle of
+sausages and two gives a figure. 3,336 triangles over 1,682 vertices, built once at boot.
+
+Exactly as promised, **pass B changed the geometry and nothing else** — [loft.ts](src/character/loft.ts)
+is the new file, and the gait, the palette, the solve and the shadow cast are untouched.
+[checkGait.mjs](scripts/checkGait.mjs) still passes all four claims unchanged, which is
+what makes that a real statement rather than a hope.
+
+- **What makes a joint bend smoothly is the rings either side of it sharing both bones.**
+  Pass A weighted every vertex rigidly, which is right for boxes and would put a hard
+  crease at every knee here. Rings inside a blend window take a weight in both bones, and
+  **that weight must be exactly one half at the joint itself** — the two bones swap roles
+  as a ring crosses, so any other value makes the ring just below and the ring just above
+  resolve to different blends and creases along the seam the window exists to remove. The
+  window is sized from the local radius, so the volume that linear blend skinning loses on
+  a hard bend is spread over a length comparable to the limb's own thickness.
+- **The caps are domes, not poles.** Fanning the last ring to a single vertex is three
+  lines shorter and draws a *cone*: it put a spike on the crown of the head, a point
+  between the legs, and a pair of hard angular tabs where the arms leave the shoulders —
+  epaulettes. Two intermediate rings on a quarter ellipse is the whole fix.
+- **The sweep stops short and the dome finishes the job.** Running rings to the end of the
+  chain and adding a cap on top would have put the crown eight centimetres above the
+  height the rig says the figure is, and the toe past the end of the foot.
+- **The shoulder joint moved inboard**, 0.185 m to 0.158 m. The first version put it out at
+  the silhouette's edge, so the arm's own cap stood proud of the chest however the cap was
+  shaped. The deltoid is the torso's width; the joint it turns about is well inside it.
+- **Winding is derived, not guessed.** The cross-section frame is built right-handed on
+  purpose, which makes `dP/dθ × dP/ds` point outward, which fixes the triangle order and
+  the analytic normals together. Back-face culling went straight back on and the figure
+  came out the right way round first time.
+
+Still 4 draw calls.
+
 #### Not in pass A
 
 - **The figure does not sink into its own prints.** Feet plant on the CPU mirror of the
@@ -736,6 +773,10 @@ Still 4 draw calls: the figure replaced the capsule rather than adding to it.
   ground height. Reading it back per foot is a Phase 8 problem, alongside the wake.
 - **The cast shadow detaches slightly at a low sun.** The normal-offset bias in
   `shVisibility` is tuned for terrain, and a leg is a much thinner caster than a dune.
+- **The cloak bone is posed but undrawn.** Bone 17 hangs off the chest and goes where the
+  back goes, and it has no geometry: a cape that does not move while you run reads worse
+  than no cape at all. Pass E brings the solver and the geometry together, driven by the
+  same wind that already carries the smoke.
 - **`mover.ts` survived.** The plan said Phase 7 would replace it with the gait machine;
   it did not, and that is the better outcome rather than a shortcut. The mover's contract
   — a feet position, a facing, a distance travelled — is exactly the gait's *input*, so

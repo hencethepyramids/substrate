@@ -31,3 +31,14 @@ compositor and a vsync. GPU pass numbers still come from a human with the overla
 - `phase7-gait-snow.png` — snow, sun 16, mid-stride. Legs split, arms counter-phased
   against them, and the alternating trail of prints behind. The prints are laid by the
   gait's own contacts, so each one is under the foot that made it.
+
+Pass B replaced the boxes with the loft. The two pass A frames above are kept on purpose
+as the before: the gait in them is the same gait, which is the point of having drawn it
+as boxes first.
+
+- `phase7-loft-stand.png` — snow, sun 28, close. The lofted surface: elliptical rings over
+  the rig, domed caps, shoulders inboard of the silhouette.
+- `phase7-loft-walk.png` — snow, sun 26, mid-stride and close. What the loft was for: the
+  knee bends without a crease because the rings across it share both bones.
+- `phase7-loft-desert.png` — desert, sun 14, walking. The whole thing at once — the
+  articulated cast shadow, the prints trailing behind, and the dunes from Phase 1.

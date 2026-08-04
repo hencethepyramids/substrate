@@ -68,13 +68,19 @@ export const P = {
     headTop: 1.8,
     hipHalf: 0.09,
     shoulderY: 1.42,
-    shoulderHalf: 0.185,
+    /**
+     * INBOARD OF THE SHOULDER'S OUTER EDGE, which is where the joint actually is. Putting
+     * it out at the silhouette's edge (0.185) left the arm's own cap standing proud of the
+     * chest as a hard angular tab — an epaulette. The deltoid is the torso's width; the
+     * joint it turns about is well inside it.
+     */
+    shoulderHalf: 0.158,
     elbowY: 1.12,
     wristY: 0.85,
     handY: 0.75,
     /** Arms hang slightly clear of the ribs, so a swing does not pass through them. */
-    elbowHalf: 0.205,
-    wristHalf: 0.225,
+    elbowHalf: 0.186,
+    wristHalf: 0.203,
     toeY: 0.03,
     toeZ: 0.17,
 } as const;
