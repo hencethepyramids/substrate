@@ -174,7 +174,9 @@ export const SCHEMA = {
     // elements/registry.ts; these are the ignition source and nothing else.
     "fire.igniteRadius": num({ group: "Fire", label: "Ignite radius", def: 1.6, min: 0.2, max: 12, step: 0.1, unit: "m" }),
     "fire.igniteRate": num({ group: "Fire", label: "Ignite rate", def: 3, min: 0.1, max: 20, step: 0.1, unit: "/s", hint: "Heat poured in per second while igniting. Normalised: 1 is as hot as this world gets." }),
-    "fire.igniteFrames": num({ group: "Fire", label: "Ignite duration", def: 30, min: 1, max: 300, step: 1, unit: "frames", advanced: true, hint: "An ignition is a press, not a permanent flame. What happens afterwards is the element's business." }),
+    "fire.igniteSeconds": num({ group: "Fire", label: "Ignite duration", def: 1.5, min: 0.05, max: 10, step: 0.05, unit: "s", hint: "An ignition is a press, not a permanent flame. What happens afterwards is the element's business. In SECONDS, so it does not get four times hotter on a faster machine." }),
+    "fire.lightPool": num({ group: "Fire", label: "Light pool", def: 14, min: 0, max: 60, step: 0.5, hint: "How brightly molten ground lights what is around it. Reads high because basalt's albedo is 0.09 — the pool is multiplied by what it is falling on, and volcanic ground is nearly black. Costs nothing in snow or desert, whose emissive gain is zero, so the taps never happen." }),
+    "fire.lightRadius": num({ group: "Fire", label: "Light pool radius", def: 6, min: 0.5, max: 24, step: 0.5, unit: "m" }),
 
     // -- Surface -------------------------------------------------------------
     // The look controls Phase 4 owns. Everything that differs BETWEEN elements is in

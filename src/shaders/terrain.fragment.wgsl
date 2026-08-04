@@ -38,6 +38,8 @@ uniform fSurface: vec4f;
 uniform fSubsurfaceTint: vec3f;
 // x: glints per square metre, y: glint lattice basis, z: glint strength, w: emissive gain.
 uniform fGrain: vec4f;
+/// x: light-pool strength, y: its radius in metres.
+uniform fPool: vec2f;
 
 /// Packed material is smoother than the loose material it was made from, so a print in
 /// snow catches a highlight the powder around it does not. One more thing the compaction
@@ -262,8 +264,19 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // drift from the sky it is a reflection of.
         color = color + (specular + glint) * sbSunIrradiance() * shadow;
 
-        // Emission. Identically zero until Phase 6 drives the phase channel with heat.
+        // Emission, and the light it casts on everything near it.
+        //
+        // The pool is gated on the element's own emissive gain, which is a UNIFORM — so
+        // snow and desert, whose gain is zero, never take the seven taps at all. Molten
+        // rock lighting the ground around it is the difference between hot material and
+        // a glowing decal, and the pool is what the fire debug view cannot show you.
         color = color + sbEmissive(sub.phase, uniforms.fGrain.w);
+        if (uniforms.fGrain.w > 0.0 && uniforms.fPool.x > 0.0) {
+            let pool = sbHeatPool(input.vWorld.xz, uniforms.fPool.y) * uniforms.fPool.x;
+            // Tinted by what fully molten material glows, so the pool and the thing
+            // casting it are the same colour by construction rather than by agreement.
+            color = color + albedo * sbEmissive(1.0, uniforms.fGrain.w) * pool;
+        }
 
         // Aerial perspective. Extinction over the path, in-scatter the colour the air
         // in that direction actually is.

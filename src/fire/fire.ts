@@ -53,8 +53,15 @@ export class Fire {
 
     private readonly _step = new Vector4(0, 0, 0, 0);
     private readonly _source = new Vector4(0, 0, 1, 0);
-    /** Frames of source left to apply. An ignition is a press, not a permanent flame. */
-    private _sourceFrames = 0;
+    /**
+     * SECONDS of source left, not frames.
+     *
+     * It counted frames at first, and that made an ignition four times hotter at 60 fps
+     * than at 240 — measured: peak heat 0.395 and peak phase 0.072 on this machine, which
+     * is barely into the phase change at all and is why the ground would not go properly
+     * molten. Everything else in this project steps on simulation seconds; so does this.
+     */
+    private _sourceLeft = 0;
 
     constructor(scene: Scene, settings: Settings, biome: BiomeState, substrate: Substrate) {
         this._scene = scene;
@@ -111,9 +118,9 @@ export class Fire {
         this._cleared = false;
 
         const step = Math.min(Math.max(dt, 0), MAX_STEP);
-        if (step <= 0 && this._sourceFrames <= 0) return;
+        if (step <= 0 && this._sourceLeft <= 0) return;
 
-        if (this._sourceFrames > 0) this._sourceFrames--;
+        if (this._sourceLeft > 0) this._sourceLeft -= step;
         else this._source.w = 0;
 
         this._step.set(step, 0, 0, 0);
@@ -129,7 +136,7 @@ export class Fire {
      */
     ignite(x: number, z: number, radius: number, rate: number): void {
         this._source.set(x, z, Math.max(radius, 1e-3), rate);
-        this._sourceFrames = Math.max(1, Math.round(this._settings.v["fire.igniteFrames"]));
+        this._sourceLeft = Math.max(1e-3, this._settings.v["fire.igniteSeconds"]);
     }
 
     /** Wipe the heat. The overlay hangs a button off this. */
@@ -205,7 +212,7 @@ export class Fire {
         if (!this._targets[0].isReady() || !this._targets[1].isReady()) return;
         this._step.set(0, 1, 0, 0);
         this._source.set(0, 0, 1, 0);
-        this._sourceFrames = 0;
+        this._sourceLeft = 0;
         for (const t of this._targets) {
             this._pushAll(t);
             t.render();

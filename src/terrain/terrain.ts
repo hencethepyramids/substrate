@@ -27,7 +27,7 @@ import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
 
 const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
 
-const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", "fSubsurfaceTint", "fGrain", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS, ...AIR_UNIFORMS];
+const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", "fSubsurfaceTint", "fGrain", "fPool", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS, ...AIR_UNIFORMS];
 
 export class Terrain {
     readonly field: Heightfield;
@@ -46,6 +46,7 @@ export class Terrain {
     private readonly _params = new Vector4(0, 0, 0, 0);
     private readonly _surface = new Vector4(0, 0, 0, 0);
     private readonly _grain = new Vector4(0, 0, 0, 0);
+    private readonly _pool = new Vector2(0, 0);
     private readonly _albedo = new Color3(1, 1, 1);
     private readonly _albedoCompacted = new Color3(1, 1, 1);
     private readonly _albedoSteep = new Color3(0.5, 0.5, 0.5);
@@ -204,6 +205,8 @@ export class Terrain {
         m.setColor3("fSubsurfaceTint", this._subsurfaceTint);
         this._grain.set(surf.glintDensity, surf.glintBasis, s["surface.glintStrength"], surf.emissiveGain);
         m.setVector4("fGrain", this._grain);
+        this._pool.set(s["sys.lightPool"] ? s["fire.lightPool"] : 0, s["fire.lightRadius"]);
+        m.setVector2("fPool", this._pool);
         this._air?.pushTo(m);
         this._airborne?.bindTo(m);
         this._fire?.bindTo(m);

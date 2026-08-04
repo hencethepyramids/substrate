@@ -24,9 +24,13 @@ const STORAGE_KEY = "substrate.settings.v4";
 const URL = process.env.SUBSTRATE_URL ?? "http://localhost:5173/";
 
 const argv = new Map();
+/** Repeatable `--set key=value`, so any control can be driven without a new flag. */
+const overrides = [];
 for (const a of process.argv.slice(2)) {
     const m = a.match(/^--([^=]+)(?:=(.*))?$/);
-    if (m) argv.set(m[1], m[2] ?? "true");
+    if (!m) continue;
+    if (m[1] === "set") overrides.push(m[2] ?? "");
+    else argv.set(m[1], m[2] ?? "true");
 }
 
 /** The full browser, never the headless shell — the shell has no GPU and so no WebGPU. */
@@ -54,6 +58,14 @@ if (argv.has("bearing")) settings["world.windBearing"] = Number(argv.get("bearin
 if (argv.has("tonemap")) settings["post.tonemap"] = argv.get("tonemap");
 // The overlay is a wall of text over the picture; off unless asked for.
 settings["ui.overlayOpen"] = argv.get("overlay") === "true";
+
+for (const o of overrides) {
+    const eq = o.indexOf("=");
+    if (eq < 0) continue;
+    const key = o.slice(0, eq);
+    const raw = o.slice(eq + 1);
+    settings[key] = raw === "true" ? true : raw === "false" ? false : Number.isNaN(Number(raw)) ? raw : Number(raw);
+}
 
 const out = argv.get("out") ?? "shots/capture.png";
 const settleMs = Number(argv.get("settle") ?? 2500);

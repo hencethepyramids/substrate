@@ -142,12 +142,22 @@ fn sbGlints(worldXZ: vec2f, n: vec3f, h: vec3f, density: f32, basis: f32, dist: 
 /// everywhere and costs three instructions — wired now for the same reason
 /// spThermalCoupling was, so Phase 6 only has to WRITE the channel and cannot introduce
 /// a second opinion about what hot material looks like.
+/// Peak emitted radiance of fully molten material.
+///
+/// This was 4.0 from Phase 4 to Phase 6 and never once exercised, because `phase` was
+/// zero everywhere until the heat pass existed to write it. The moment it was, 4.0 put
+/// several metres of ground at radiance 2 and AgX did exactly what AgX is for — rolled
+/// it off and desaturated it — so the pool came out as a flat white hole with no colour
+/// left in it. A reference surface in full sun lands just under 1.0, so 1.8 reads as
+/// unmistakably hotter than daylight while keeping its hue.
+const SB_EMISSIVE_PEAK: f32 = 1.8;
+
 fn sbEmissive(phase: f32, gain: f32) -> vec3f {
     let t = clamp(phase, 0.0, 1.0);
     // A crude blackbody walk: dull red, through orange, toward white-hot. Quadratic in
     // t so that merely warm material does not glow.
     let hue = vec3f(1.0, 0.08 + 0.35 * t, 0.02 + 0.25 * t * t);
-    return hue * (gain * t * t * 4.0);
+    return hue * (gain * t * t * SB_EMISSIVE_PEAK);
 }
 
 /// Diffuse plus subsurface back-scatter, per unit irradiance.

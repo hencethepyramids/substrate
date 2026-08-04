@@ -549,6 +549,35 @@ then sets. Same pass, same five numbers in `FireParams`, no branch on biome.
   airborne exchange follows.
 
 **Verified on an RTX Lovelace card.** `ignite` is the acceptance test as one click.
+Measured through the buffers rather than eyeballed: heat peaks at 0.99 about 1.5 s in and
+is already falling by 4 s, while phase is *still climbing* at 8 s and reaches 0.72. That
+gap is the crust, in numbers.
+
+#### Pass B, the light pool — landed
+
+Molten rock does not merely glow, it **lights things**, and a surface lit only by its own
+emission reads as a decal. There is no light list and there does not need to be one: the
+heat buffer already knows where every hot cell is, so the pool is an area light that
+happens to be stored as a texture, integrated by sampling a disc around the shaded point.
+Seven taps on a golden-angle spiral with `sqrt` spacing, so equal *area* sits behind each
+one; falloff is inverse-square with a `+1` so a cell underfoot cannot go singular.
+
+It is gated on the element's emissive gain, which is a uniform — so snow and desert never
+take the taps at all.
+
+**Two magnitudes were wrong and only measurement found them.** `fire.igniteFrames`
+counted *frames*, which made an ignition four times hotter at 60 fps than at 240 and left
+peak phase at 0.072 — barely into the transition, which is why the ground would not go
+properly molten. It counts seconds now, like everything else in this project. And
+`sbEmissive` carried a `× 4.0` from Phase 4 that had **never once been exercised**,
+because `phase` was zero until Phase 6 existed to write it; the first time it ran it put
+several metres of ground at radiance 2 and AgX did exactly what AgX is for, rolling it
+off into a flat white hole. 1.8 keeps its hue against a reference surface of 1.0.
+
+The core still reads pale rather than saturated, which is AgX desaturating a genuinely
+very bright source and is not far off how lava photographs. What it actually needs is
+**crust**: a uniform molten disc is the wrong shape for lava, and dark crust broken by
+glowing cracks is what pass C is for.
 
 ### Controls
 
