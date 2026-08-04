@@ -4,7 +4,7 @@ import type { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 
 import { probeWebGPU, showCapabilityFailure, showFatalError } from "./core/capability";
 import { createEngine, bindEngineSettings } from "./core/engine";
-import { LoadingScreen, nextFrame, compileOrWarn } from "./core/loading";
+import { LoadingScreen, nextFrame } from "./core/loading";
 import { Settings } from "./core/settings";
 import { BiomeState } from "./core/biome";
 import { Perf } from "./core/perf";
@@ -21,7 +21,8 @@ import { AirField } from "./air/airField";
 import { Airborne } from "./air/airborne";
 import { Fire } from "./fire/fire";
 import { Embers } from "./fire/embers";
-import { PlaceholderCharacter } from "./character/placeholder";
+import { Gait } from "./character/gait";
+import { Figure } from "./character/figure";
 import { registerShaderIncludes } from "./shaders/lib/register";
 import { Overlay } from "./ui/overlay";
 import { BIOME_IDS } from "./elements/registry";
@@ -64,7 +65,8 @@ async function boot(): Promise<void> {
     let airborne!: Airborne;
     let fire!: Fire;
     let embers!: Embers;
-    let character!: PlaceholderCharacter;
+    let character!: Figure;
+    let gait!: Gait;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
 
@@ -112,8 +114,14 @@ async function boot(): Promise<void> {
         // the ground reads the air's debt, and each sees the other's previous step.
         substrate.setAirborne(airborne);
         embers = new Embers(scene, settings, biome, terrain.field, substrate, air, fire);
-        character = new PlaceholderCharacter(scene, settings, sky, shadows);
-        shadows.setCasters(terrain.mesh, [character.mesh]);
+        // The gait needs the CPU mirror of the heightfield to plant feet on, so it is
+        // built with the terrain rather than with the mover. The figure needs the gait:
+        // its geometry is authored against the rig, and its pose is the gait's palette.
+        gait = new Gait(settings, terrain.field);
+        character = new Figure(scene, settings, sky, shadows, gait);
+        // Skinned cast, not the shared world-transform one — the figure has no world
+        // matrix for that material to read.
+        shadows.setCasters(terrain.mesh, [{ mesh: character.mesh, material: character.castMaterial }]);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
     });
@@ -142,13 +150,17 @@ async function boot(): Promise<void> {
 
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
     loader.add("compiling pipelines", 5, async (report) => {
-        const characterOk = await compileOrWarn("character", () => character.material.forceCompilationAsync(character.mesh));
+        mover.teleport(0, 0);
+        mover.position.y = terrain.field.sampleHeight(0, 0);
+        // Before the figure compiles: its first draw reads the palette, and a palette of
+        // zeros collapses every vertex onto the origin.
+        gait.resync(mover);
+        gait.update(mover, 0);
+        await character.prepare();
         report(0.3);
         await shadows.prepare();
         report(0.5);
 
-        mover.teleport(0, 0);
-        mover.position.y = terrain.field.sampleHeight(0, 0);
         rig.snap();
 
         // Compilation is not the whole story on WebGPU — the render pipeline state
@@ -164,7 +176,7 @@ async function boot(): Promise<void> {
             character.update(rig.camera);
             shadows.update(rig.camera);
             scene.render();
-            if (terrain.ready && sky.ready && shadows.ready && substrate.ready && character.isReady() && scene.isReady()) break;
+            if (terrain.ready && sky.ready && shadows.ready && substrate.ready && character.ready && scene.isReady()) break;
             await nextFrame();
         }
 
@@ -175,7 +187,7 @@ async function boot(): Promise<void> {
                 `sky ${sky.compiled ? "ok" : "FAILED"}, ` +
                 `shadow cast ${shadows.compiled ? "ok" : "FAILED"}, ` +
                 `substrate relax ${substrate.compiled ? "ok" : "FAILED"}, ` +
-                `character material ${characterOk ? "ok" : "FAILED"}, ` +
+                `character material ${character.compiled ? "ok" : "FAILED"}, ` +
                 `height mirror ${terrain.field.mirrorValid ? "ok" : "FAILED"}, ` +
                 `ground at origin ${terrain.field.sampleHeight(0, 0).toFixed(2)} m`,
         );
@@ -194,7 +206,7 @@ async function boot(): Promise<void> {
         gpu.register("substrate", () => substrate.gpuTime);
         gpu.register("airborne", () => airborne.gpuTime);
         gpu.register("heat", () => fire.gpuTime);
-        registerActions(overlay, settings, mover, rig, terrain, substrate, carve, fire);
+        registerActions(overlay, settings, mover, rig, terrain, substrate, gait, fire);
     });
 
     try {
@@ -245,11 +257,14 @@ async function boot(): Promise<void> {
         perf.end(S_SIM);
 
         perf.begin(S_GROUND);
-        // Stand on the surface that is drawn, sampled through the CPU mirror of the
-        // same bilinear filter the vertex shader uses. Phase 7 replaces this with
-        // per-foot contact against the same field.
+        // Stand on the surface that is drawn, sampled through the CPU mirror of the same
+        // bilinear filter the vertex shader uses. The body's height comes from under its
+        // centre; the gait then plants each foot against the same field independently,
+        // which is what lets the two feet sit at different heights on a slope.
         mover.position.y = terrain.field.sampleHeight(mover.position.x, mover.position.z);
-        character.setPose(mover.position, mover.facing);
+        // After the grounding, because character space is pinned to it, and before the
+        // carve pass, which stamps the contacts this decides.
+        gait.update(mover, simDt);
         perf.end(S_GROUND);
 
         perf.begin(S_CAMERA);
@@ -274,7 +289,7 @@ async function boot(): Promise<void> {
         // beauty pass reads it this frame either way.
         air.update(simDt);
         // Then the carve sources, then the step that consumes them.
-        carve.update(input, mover, substrate, simDt);
+        carve.update(input, mover, gait, substrate, simDt);
         substrate.update(rig.camera, simDt);
         // After the ground: it reads the mass the substrate has just finished writing,
         // on that pass's own window.
@@ -317,7 +332,7 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, rig, air, substrate, airborne, fire, terrain };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
@@ -338,14 +353,15 @@ async function boot(): Promise<void> {
 }
 
 /** Overlay buttons. Phase 10's element interactions register here too. */
-function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, terrain: Terrain, substrate: Substrate, carve: Carve, fire: Fire): void {
+function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, terrain: Terrain, substrate: Substrate, gait: Gait, fire: Fire): void {
     const teleport = (x: number, z: number): void => {
         mover.teleport(x, z);
         mover.position.y = terrain.field.sampleHeight(x, z);
         rig.snap();
-        // A jump is not a stride. Without this the gait would lay its next print
-        // wherever the character landed, at a random point in the cycle.
-        carve.resync(mover);
+        // A jump is not a stride. Without this the gait would lay its next print wherever
+        // the character landed, at a random point in the cycle — and would spend that
+        // cycle swinging a foot from eight hundred metres away.
+        gait.resync(mover);
     };
     overlay.addAction("cycle biome", () => {
         const current = settings.get("world.biome") as BiomeId;

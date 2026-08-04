@@ -47,6 +47,17 @@ const CLEAR = new Color4(1, 1, 1, 1);
 export const SHADOW_UNIFORMS = ["shMatrix0", "shMatrix1", "shMatrix2", "shSplits", "shTexelWorld", "shDepthScale", "shParams", "shControl"] as const;
 export const SHADOW_SAMPLERS = ["shMap"] as const;
 
+/** A mesh that casts, and the material it casts with. */
+export interface MeshCaster {
+    mesh: Mesh;
+    /**
+     * Omit for the shared world-transform cast. Supply one when the mesh is not placed
+     * by a world matrix, so that the cast reproduces the same vertex positions the
+     * beauty pass draws.
+     */
+    material?: ShaderMaterial;
+}
+
 export class Shadows {
     readonly atlas: RenderTargetTexture;
     readonly terrainCast: ShaderMaterial;
@@ -62,6 +73,9 @@ export class Shadows {
     private _resolution: number;
     private _pass = 0;
     private _casters: Mesh[] = [];
+    private _meshCasters: MeshCaster[] = [];
+    /** Cast materials that are not `meshCast` and so need driving alongside it. */
+    private readonly _overrides: ShaderMaterial[] = [];
     private _field: BaseTexture | null = null;
 
     // Preallocated. update() runs every frame.
@@ -140,23 +154,39 @@ export class Shadows {
 
     /**
      * Register the meshes that cast. The terrain gets the clipmap cast material and
-     * everything else the world-transform one.
+     * everything else the world-transform one, unless it brings its own.
+     *
+     * A caster may override because it is not positioned by a world matrix at all. The
+     * character is the first: its pose lives in a bone palette, so a cast that went
+     * through the shared material would draw the shadow of a rest pose standing at the
+     * origin while the figure walked away from it.
      */
-    setCasters(terrain: Mesh, meshes: Mesh[]): void {
-        this._casters = [terrain, ...meshes];
+    setCasters(terrain: Mesh, meshes: MeshCaster[]): void {
+        this._meshCasters = meshes;
+        this._casters = [terrain, ...meshes.map((c) => c.mesh)];
         this.atlas.renderList = this._casters as AbstractMesh[];
         this.atlas.setMaterialForRendering(terrain, this.terrainCast);
-        for (const m of meshes) this.atlas.setMaterialForRendering(m, this.meshCast);
+        this._overrides.length = 0;
+        for (const c of meshes) {
+            const material = c.material ?? this.meshCast;
+            this.atlas.setMaterialForRendering(c.mesh, material);
+            if (material !== this.meshCast && !this._overrides.includes(material)) this._overrides.push(material);
+        }
         // A caster behind the camera still casts into the view. The render list is
         // culled against the active camera, so opt every caster out of that test.
         for (const m of this._casters) m.alwaysSelectAsActiveMesh = true;
     }
 
-    /** Compiles both cast pipelines behind the loading screen. */
+    /** Compiles every cast pipeline behind the loading screen. */
     async prepare(): Promise<void> {
-        const terrainOk = this._casters.length > 0 ? await compileOrWarn("shadow cast (terrain)", () => this.terrainCast.forceCompilationAsync(this._casters[0])) : false;
-        const meshOk = this._casters.length > 1 ? await compileOrWarn("shadow cast (mesh)", () => this.meshCast.forceCompilationAsync(this._casters[1])) : true;
-        this.compiled = terrainOk && meshOk;
+        let ok = this._casters.length > 0 ? await compileOrWarn("shadow cast (terrain)", () => this.terrainCast.forceCompilationAsync(this._casters[0])) : false;
+        // Against the mesh that actually uses it — a cast material compiled against
+        // geometry with different attributes proves nothing about the draw that follows.
+        for (const c of this._meshCasters) {
+            const material = c.material ?? this.meshCast;
+            ok = (await compileOrWarn(`shadow cast (${material.name})`, () => material.forceCompilationAsync(c.mesh))) && ok;
+        }
+        this.compiled = ok;
     }
 
     get ready(): boolean {
@@ -229,6 +259,12 @@ export class Shadows {
             this.terrainCast.setVector2("shTile", this._tile);
             this.meshCast.setMatrix("shViewProj", this._matrices[c]);
             this.meshCast.setVector2("shTile", this._tile);
+            // Every override gets the same cascade. Miss one and its caster renders all
+            // three cascades with whichever matrix happened to be left on it.
+            for (const m of this._overrides) {
+                m.setMatrix("shViewProj", this._matrices[c]);
+                m.setVector2("shTile", this._tile);
+            }
             this.atlas.render();
         }
     }
@@ -288,9 +324,10 @@ export class Shadows {
     }
 
     private _rebuildAtlas(): void {
-        const casters = this._casters;
+        const terrain = this._casters[0];
+        const meshes = this._meshCasters;
         this.atlas.resize({ width: this._resolution * CASCADES, height: this._resolution });
-        if (casters.length > 0) this.setCasters(casters[0], casters.slice(1));
+        if (terrain !== undefined) this.setCasters(terrain, meshes);
         this.bindField(this._field);
     }
 

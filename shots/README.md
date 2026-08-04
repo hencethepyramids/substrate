@@ -22,3 +22,12 @@ injected through `localStorage` before load, so the harness needs no hook into t
 **These are not performance evidence.** The harness reports which adapter it got and it
 does reach the real card, but headless timings are not the timings you get with a
 compositor and a vsync. GPU pass numbers still come from a human with the overlay open.
+
+## Phase 7
+
+- `phase7-figure-stand.png` — snow, sun 22. The figure standing. Eighteen boxes, one per
+  bone, skinned through the palette; head, forearms and hands take the bare material and
+  everything else the clothed one.
+- `phase7-gait-snow.png` — snow, sun 16, mid-stride. Legs split, arms counter-phased
+  against them, and the alternating trail of prints behind. The prints are laid by the
+  gait's own contacts, so each one is under the foot that made it.

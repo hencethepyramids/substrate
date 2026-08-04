@@ -20,6 +20,7 @@ import air from "./air.wgsl?raw";
 import airborne from "./airborne.wgsl?raw";
 import fireParams from "./fireParams.wgsl?raw";
 import fireBuffer from "./fireBuffer.wgsl?raw";
+import skin from "./skin.wgsl?raw";
 
 /**
  * Registers the shared WGSL includes.
@@ -69,4 +70,8 @@ export function registerShaderIncludes(): void {
     // can read the element's heat block without binding a buffer it does not want.
     store["substrateFireParams"] = fireParams;
     store["substrateFireBuffer"] = fireBuffer;
+    // Declares a uniform and no texture, so the character's beauty pass and its shadow
+    // cast both take it. That is the point: a figure whose shadow is skinned from a
+    // second copy of this is a figure casting the shadow of a pose it is not in.
+    store["substrateSkin"] = skin;
 }

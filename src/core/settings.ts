@@ -229,12 +229,20 @@ export const SCHEMA = {
     "char.sprintMultiplier": num({ group: "Character", label: "Sprint multiplier", def: 2.4, min: 1, max: 4, step: 0.05 }),
     "char.acceleration": num({ group: "Character", label: "Acceleration", def: 22, min: 2, max: 80, step: 1, unit: "m/s2", advanced: true }),
     "char.turnRate": num({ group: "Character", label: "Turn rate", def: 540, min: 90, max: 1440, step: 10, unit: "deg/s", advanced: true }),
-    // Footfalls into the substrate. Phase 7's gait machine inherits these rather than
-    // replacing them — it phases on distance travelled for the same reason this does.
-    "char.strideLength": num({ group: "Character", label: "Stride length", def: 0.75, min: 0.2, max: 2.5, step: 0.05, unit: "m", hint: "Ground between prints. Phased on distance, not time, so it holds at any speed." }),
+    // The gait, and the footfalls it lays. Stride length is the one number both the legs
+    // and the prints are phased on, which is why a print stays under the foot that made it.
+    "char.strideLength": num({ group: "Character", label: "Stride length", def: 0.75, min: 0.2, max: 2.5, step: 0.05, unit: "m", hint: "Ground between prints, and one step of the walk cycle. Phased on distance, not time, so it holds at any speed." }),
     "char.stanceWidth": num({ group: "Character", label: "Stance width", def: 0.28, min: 0, max: 1, step: 0.01, unit: "m" }),
+    "char.stepLift": num({ group: "Character", label: "Step lift", def: 0.13, min: 0, max: 0.6, step: 0.01, unit: "m", hint: "Ground clearance at mid-swing. A swinging foot never drops below the terrain regardless." }),
+    "char.armSwing": num({ group: "Character", label: "Arm swing", def: 34, min: 0, max: 90, step: 1, unit: "deg", hint: "Counter-phased against the legs. Zero reads as a shuffle." }),
+    "char.footRoll": num({ group: "Character", label: "Foot roll", def: 26, min: 0, max: 60, step: 1, unit: "deg", advanced: true }),
+    "char.lean": num({ group: "Character", label: "Forward lean", def: 9, min: 0, max: 30, step: 0.5, unit: "deg", advanced: true }),
+    "char.bank": num({ group: "Character", label: "Bank into turns", def: 1, min: 0, max: 2, step: 0.05, advanced: true, hint: "Scales the real balance angle, tan(bank) = v*omega/g. 1 is what physics asks for." }),
     "char.footRadius": num({ group: "Character", label: "Foot radius", def: 0.12, min: 0.02, max: 0.6, step: 0.01, unit: "m" }),
     "char.footDepth": num({ group: "Character", label: "Foot depth", def: 0.09, min: 0, max: 0.6, step: 0.005, unit: "m", hint: "At walking pace; a run presses harder. The load is the character's, the response is the element's." }),
+    "char.clothRoughness": num({ group: "Character", label: "Cloth roughness", def: 0.72, min: 0.04, max: 1, step: 0.01, advanced: true }),
+    "char.skinRoughness": num({ group: "Character", label: "Skin roughness", def: 0.44, min: 0.04, max: 1, step: 0.01, advanced: true }),
+    "char.subsurface": num({ group: "Character", label: "Subsurface", def: 0.35, min: 0, max: 1, step: 0.01, advanced: true, hint: "Wrapped light through the surface, tinted the way blood tints it." }),
 
     // -- Debug ---------------------------------------------------------------
     "debug.view": enm({ group: "Debug", label: "Debug view", def: "off", options: DEBUG_VIEWS }),

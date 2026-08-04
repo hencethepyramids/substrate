@@ -155,6 +155,25 @@ if (argv.has("ignite")) {
     }, Number(argv.get("ignite")) || 0);
 }
 
+// Optionally walk first, for Phase 7's questions. A still of a standing figure says
+// nothing about a gait, and neither does one of a figure teleported along a line — the
+// stride is phased on ground travelled, so it has to actually travel. Real key events
+// through the real Input class, because a gait driven by poking the mover would not be
+// exercising the path that ships.
+const walkMs = Number(argv.get("walk") ?? 0);
+if (walkMs > 0) {
+    const key = argv.get("walkKey") ?? "w";
+    await page.keyboard.down(key);
+    if (argv.get("sprint") === "true") await page.keyboard.down("Shift");
+    await page.waitForTimeout(walkMs);
+    // Held through the screenshot when asked, so the shot catches a foot mid-swing
+    // rather than the settled stand the figure relaxes into a moment after stopping.
+    if (argv.get("keepWalking") !== "true") {
+        await page.keyboard.up(key);
+        if (argv.get("sprint") === "true") await page.keyboard.up("Shift");
+    }
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 

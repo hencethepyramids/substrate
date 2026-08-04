@@ -39,6 +39,22 @@ through its own CPU mirror, and reports the slope distribution. That is where
 `air.separation` got its number, and it is also how the terrain turned out to be far
 gentler than the registry's own comments claim.
 
+[scripts/checkGait.mjs](scripts/checkGait.mjs) does the same for the walk, and exists
+because **foot sliding is invisible in a still**. It is a few centimetres per frame under
+a body moving three metres a second; in motion it reads as "something is slightly off"
+rather than as anything you could point at. So it walks the character with real key
+events, reads each ankle back out of the **baked bone palette** — the matrix the GPU
+actually draws, not the gait's own bookkeeping, so the pose, the shortest-arc rotation
+and the root transform are all under test — and reports the drift across each whole
+contact, the distance from each print to the foot that made it, the stride paced out on
+the ground, and whether the contact foot is touching the terrain.
+
+Both of the failures it found on the first run were in the check rather than the code,
+which is worth saying plainly: it read the palette's translation column as though that
+were the joint position, and it identified the planted foot as whichever one was lower,
+which on a downslope is often the one in mid-swing. A measurement is a thing that can be
+wrong, and one that agrees with you is not evidence.
+
 Typecheck and build are separate steps on purpose — a type error and a bundling
 error should be two distinct red steps, not one ambiguous failure.
 
@@ -61,7 +77,7 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 5 complete
+## Status: Phase 6 complete
 
 | Phase | State |
 | --- | --- |
@@ -71,8 +87,8 @@ between "builds" and "the driver will accept this".
 | 3 — substrate buffer | **done** |
 | 4 — surface materials | **done** |
 | 5 — air | **done** |
-| 6 — fire | not started |
-| 7 — character | not started |
+| 6 — fire | **done** |
+| 7 — character | **pass A landed** |
 | 8 — traversal and wakes | not started |
 | 9 — post | not started |
 | 10 — interactions | not started |
@@ -642,6 +658,90 @@ Three mistakes on the way in, and the last is the one worth remembering:
 - **Size followed the fade**, so a spark shrank to nothing by the time it had climbed
   clear of the pool that launched it. It dims as it rises; it does not evaporate.
 
+### Phase 7, character
+
+#### Pass A, the skeleton and the gait — landed
+
+**The bean is gone.** Eighteen bones written down in code, a solved walk cycle, analytic
+two-bone IK for the legs, and GPU skinning shared with the shadow cast.
+
+**The cycle is phased on ground travelled, not on time** — which is not a new decision,
+it is the contract [Phase 3 wrote down](#pass-2-writing-into-it) three phases before
+there were any legs to honour it. The payoff is that **a planted foot does not move**.
+Stance is not the foot animating slowly backwards; it is the foot at a fixed world
+position while the body travels past it. Feet cannot slide because nothing in the solve
+gives them anywhere to slide to, and the prints laid in Phase 3 stayed exactly where they
+were when the real legs arrived on top of them.
+
+Measured on the card, walking and sprinting, by [checkGait.mjs](scripts/checkGait.mjs):
+
+| | walk (3.2 m/s) | sprint (7.7 m/s) |
+| --- | --- | --- |
+| stance drift, worst of all contacts | **0.0 cm** | **0.0 cm** |
+| body travel per frame, for scale | 1.4 cm | 3.3 cm |
+| print to the ankle that made it | 0.5 cm | 2.7 cm |
+| stride paced out between prints | **0.750 m** (set: 0.750) | **0.750 m** |
+| contact foot against the terrain | 0.0 cm float, 0.0 cm sink | 0.0 cm / 0.0 cm |
+
+**The footfall moved out of the carve pass and into the gait.** Phases 3 to 6 kept their
+own copy of the stride phase there, because there were no legs to ask. Two copies of
+"which foot, and where" is exactly how prints drift out from under the feet that made
+them, so the gait now owns the contact and `carve.ts` reads it. What stayed behind is the
+half that is about the *ground* — how wide a foot is and how hard it presses.
+
+Things worth writing down:
+
+- **The pelvis bob is not a chosen number.** With the feet split by one stride at contact,
+  each is half a stride from the body, so a leg of fixed length can only reach the ground
+  by dropping the hip through the sagitta of that triangle — 8.5 cm at the default stride.
+  At mid-stance the leg is vertical and the hip rides at full height. Moving the stride
+  slider therefore changes the walk rather than breaking it.
+- **The bank into a turn is the real balance angle**, `tan(bank) = v·ω/g` — the sum a
+  cyclist does. It falls out of how fast the character is actually turning rather than out
+  of a curve someone drew.
+- **The settle blend must not touch the planted foot.** Blending *both* feet toward a
+  neutral stance as the character stops is the obvious thing to write and it is wrong: a
+  foot in stance is already standing somewhere it legitimately landed, and dragging it
+  toward where the body has since got to is foot sliding — the one failure the whole
+  design exists to prevent. It showed up as a few centimetres of creep in the first half
+  second of every walk, invisible in motion and plainly there in the measurement. The
+  planted foot now holds and the swinging one comes down beside it, which is also what
+  stopping actually looks like.
+- **Rest orientations are all the identity, so there are no inverse bind matrices.**
+  Everything is solved in character space with the origin under the feet, which collapses
+  a bone's inverse bind to a translation by minus its own joint, and skinning to
+  `root · translate(head) · R · translate(−restHead)`. No quaternion chain and no bind
+  pose to keep in step with anything.
+- **The shadow cast skins from the same include.** It cannot go through the shared
+  world-transform cast, because the figure has no world matrix — its pose lives entirely
+  in the bone palette, and a cast that ignored the palette would draw the shadow of a rest
+  pose standing at the origin while the character walked away from it.
+- **The palette length must stay a literal** in `uniform skBones: array<vec4f, 54>`.
+  Babylon's WGSL processor reads that number straight out of the declaration to size the
+  uniform buffer, so a named constant would leave it sized zero.
+
+**Drawn as boxes, deliberately.** The gait is the hard part of this phase and a box figure
+shows it more honestly than a lofted one will: a foot that slides, a knee through its own
+limit or a bone weighted to the wrong joint is unmissable on a box and easy to miss under
+a smooth skin. Pass B replaces the geometry and touches nothing else — the skinning path,
+the palette and the solve are already what they will be.
+
+Still 4 draw calls: the figure replaced the capsule rather than adding to it.
+
+#### Not in pass A
+
+- **The figure does not sink into its own prints.** Feet plant on the CPU mirror of the
+  heightfield, which is the undisturbed surface; the depression the substrate carves lives
+  only on the GPU. So a deep print in snow is drawn under a foot standing at the original
+  ground height. Reading it back per foot is a Phase 8 problem, alongside the wake.
+- **The cast shadow detaches slightly at a low sun.** The normal-offset bias in
+  `shVisibility` is tuned for terrain, and a leg is a much thinner caster than a dune.
+- **`mover.ts` survived.** The plan said Phase 7 would replace it with the gait machine;
+  it did not, and that is the better outcome rather than a shortcut. The mover's contract
+  — a feet position, a facing, a distance travelled — is exactly the gait's *input*, so
+  the gait consumes it instead of absorbing it, and locomotion stays separable from the
+  legs that draw it.
+
 ### Controls
 
 | | |
@@ -735,12 +835,12 @@ will ever exist"). Each phase implements its own entries.
 
 ### Placeholders, marked for deletion
 
-- `src/shaders/phase0.*.wgsl` — the capsule's material. Deleted by Phase 7. It is lit
-  through the same sky include the terrain uses, because a capsule shaded by a
-  different ambient than the ground it stands on is how you end up trusting the wrong
-  one.
-- `src/core/mover.ts` — kinematic locomotion. Phase 7 replaces it with the solved
-  gait machine, keeping the same contract: it owns a feet position and a facing.
+Both of this section's entries were paid off by Phase 7 pass A. `src/shaders/phase0.*.wgsl`
+and `src/character/placeholder.ts` — the capsule and its material — are deleted.
+`src/core/mover.ts` stayed, for the reason given [above](#not-in-pass-a): the gait
+consumes its contract rather than replacing it.
+
+Nothing is currently marked for deletion.
 
 ---
 
@@ -755,7 +855,9 @@ src/
   terrain/           heightfield bake + CPU mirror, clipmap mesh, terrain system
   substrate/         the ping-ponged buffer and its relaxation; what writes into it
   render/            sky, atmosphere and IBL; the shared debug-view codes
-  character/         the placeholder capsule, until Phase 7
+  character/         the rig, the solved gait, and the skinned figure
+  air/               the wind field and what it carries
+  fire/              heat, the phase change, and embers
   shaders/           all WGSL — lib/ holds the shared includes
   ui/                settings and performance overlay
 scripts/
