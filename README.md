@@ -88,7 +88,7 @@ between "builds" and "the driver will accept this".
 | 4 — surface materials | **done** |
 | 5 — air | **done** |
 | 6 — fire | **done** |
-| 7 — character | **passes A–B landed** |
+| 7 — character | **passes A–C landed** |
 | 8 — traversal and wakes | not started |
 | 9 — post | not started |
 | 10 — interactions | not started |
@@ -767,10 +767,7 @@ Still 4 draw calls.
 
 #### Not in pass A
 
-- **The figure does not sink into its own prints.** Feet plant on the CPU mirror of the
-  heightfield, which is the undisturbed surface; the depression the substrate carves lives
-  only on the GPU. So a deep print in snow is drawn under a foot standing at the original
-  ground height. Reading it back per foot is a Phase 8 problem, alongside the wake.
+- ~~**The figure does not sink into its own prints.**~~ Closed by pass C.
 - **The cast shadow detaches slightly at a low sun.** The normal-offset bias in
   `shVisibility` is tuned for terrain, and a leg is a much thinner caster than a dune.
 - **The cloak bone is posed but undrawn.** Bone 17 hangs off the chest and goes where the
@@ -782,6 +779,64 @@ Still 4 draw calls.
   — a feet position, a facing, a distance travelled — is exactly the gait's *input*, so
   the gait consumes it instead of absorbing it, and locomotion stays separable from the
   legs that draw it.
+
+#### Pass C, the ground — landed
+
+The character now stands on the surface it has **carved**, not the one underneath it.
+
+Until this pass the depression lived only in a GPU buffer while the gait ran on the CPU,
+so a boot planted on the undisturbed heightfield with its own print drawn ten centimetres
+below it. [groundProbe.ts](src/substrate/groundProbe.ts) closes that: a 64-texel tile of
+the substrate, rendered **through the same `substrateBuffer` include the terrain shades
+with** and read back asynchronously.
+
+**The obvious fix is the wrong one.** Keeping a CPU copy of the stamps and decaying it to
+approximate the relaxation would put a second, simpler physics beside the real one, and
+the two would agree at first and drift for ever after — the exact self-consistent-but-wrong
+shape this project keeps finding. There is no second model. One source of truth, sampled
+twice.
+
+- **A planted foot is fixed horizontally and live vertically.** The plant's height is
+  recorded at contact, which is *before* the print exists — the carve pass stamps it on the
+  same frame. Holding the foot there left the boot hanging over its own print by the full
+  depth of it, measured at 10.7 cm. The ground is allowed to move under a planted foot, and
+  it does; only X and Z are pinned, which is all the no-sliding claim ever needed.
+- **The sink damping is anti-pop, not soil mechanics**, and sizing it as though it were
+  physics is what made it wrong. At 45 per second the foot lagged its own print through a
+  third of every contact; a sprint's stance is only 78 ms long, so the time constant has to
+  be a couple of frames — 10 ms — and no more.
+- **The pelvis cap is the bob, generalised.** The hip can be no higher above either ankle
+  than a leg can span at that horizontal distance. On flat ground that is exactly the
+  sagitta that gives the bob; on a slope, or over a print, it binds and the figure crouches
+  instead of leaving a straight leg still short of the floor. One triangle, two jobs.
+- **The foot pitches onto the slope it is standing on**, measured over the length of the
+  foot rather than differentiated at a point — the substrate's 6 cm texels have derivative
+  jumps at every one of them, and a point derivative flicks between them as a foot crosses.
+  Pitch only: the shortest-arc rotation the rig uses leaves twist about the bone
+  undetermined by construction, so sideways roll needs a frame the skeleton does not carry.
+
+Measured on the card, by [checkGait.mjs](scripts/checkGait.mjs), now that it can tell the
+two surfaces apart:
+
+| | walk | sprint |
+| --- | --- | --- |
+| contact foot vs the **drawn** surface, settled | 0.0 cm | 0.3 cm |
+| depth of print it is standing in | 11.0 cm | 15.9 cm |
+| below the undisturbed heightfield | 9.9 cm | 12.0 cm |
+| ground probe round trip | 14.1 ms | 9.2 ms |
+| of contact spent settling | 3.2% | 29.1% |
+
+**The sprint number is the honest cost and it was measured, not guessed.** The readback is
+about one and a half frames old, which is 5% of a walking stance and 20% of a sprinting
+one — so at a sprint the foot spends the first third of each contact catching up with a
+print it has not been told about yet. Latency is the price of having one source of truth
+instead of two, and it is the right price.
+
+Two things worth flagging rather than fixing here: a sprint stamps a print **twice as
+deep** as a walk while the foot is on it for a quarter as long, which is backwards from
+how a real footfall works and is now visible because the character actually stands in it;
+and 11 cm at a walk reads closer to deep snow than to a dusting. Both are `char.footDepth`
+and its load curve, and both are one slider.
 
 ### Controls
 

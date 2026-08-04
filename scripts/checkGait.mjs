@@ -100,8 +100,15 @@ await page.evaluate(() => {
             // The ground UNDER EACH FOOT, not under the body. On any slope the two feet
             // stand at different heights, and measuring both against the body's own
             // ground is how you convince yourself a correct figure is sinking.
-            rg: app.terrain.field.sampleHeight(r[0], r[2]),
-            lg: app.terrain.field.sampleHeight(l[0], l[2]),
+            //
+            // Both surfaces: the undisturbed heightfield, and the one that is actually
+            // DRAWN once the substrate has been carved out of it. A foot standing on the
+            // first and floating over the second is exactly the gap pass C closed, so the
+            // check has to be able to tell them apart.
+            rg: app.gait.groundAt(r[0], r[2]),
+            lg: app.gait.groundAt(l[0], l[2]),
+            rgRaw: app.terrain.field.sampleHeight(r[0], r[2]),
+            lgRaw: app.terrain.field.sampleHeight(l[0], l[2]),
             body: [app.mover.position.x, app.mover.position.y, app.mover.position.z],
             speed: app.mover.speed,
             distance: app.mover.distance,
@@ -145,6 +152,7 @@ const result = await page.evaluate(() => {
         stride: app.settings.get("char.strideLength"),
         stance: app.settings.get("char.stanceWidth"),
         walkSpeed: app.settings.get("char.walkSpeed"),
+        probeLatency: app.groundProbe.latencyMs,
         // Ground height under each recorded stamp, so a print can be checked against the
         // surface rather than against the body's own idea of where it is.
         stampGround: window.__stamps.map((s) => app.terrain.field.sampleHeight(s.x, s.z)),
@@ -153,7 +161,7 @@ const result = await page.evaluate(() => {
 
 await browser.close();
 
-const { log, stamps, stride, stance, walkSpeed } = result;
+const { log, stamps, stride, stance, walkSpeed, probeLatency } = result;
 if (log.length < 30) {
     console.error(`only ${log.length} frames captured — did the page run?`);
     process.exit(1);
@@ -232,10 +240,36 @@ for (const s of stamps) {
 }
 
 // --- 3. is it standing on the ground --------------------------------------
+// Milliseconds since each foot's contact began. A foot cannot be standing on ground the
+// readback has not delivered yet, so 'has it settled' has to be asked on a clock rather
+// than on a fraction of a stance whose length changes by four times between walk and
+// sprint.
+const since = { r: [], l: [] };
+for (const foot of ['r', 'l']) {
+    const key = foot === 'r' ? 'pr' : 'pl';
+    let start = log[0].t;
+    for (let i = 0; i < log.length; i++) {
+        if (i > 0 && log[i][key] < log[i - 1][key]) start = log[i].t;
+        since[foot].push(log[i].t - start);
+    }
+}
+// The foot is chasing a target it learns about one round trip late, and then follows with
+// a ten millisecond time constant. Four of those plus the measured latency is when it
+// should be there; before that, nothing is being claimed.
+const settleBy = probeLatency + 40;
 let worstFloat = 0;
 let worstSink = 0;
 let groundChecked = 0;
-for (const f of log) {
+// The same measurement against the UNDISTURBED heightfield. If the character is standing
+// on the drawn surface, this one should show it floating — by however deep its own prints
+// are. A run where both numbers are zero means the substrate never got carved and the
+// check proved nothing.
+const rawClears = [];
+let deepestPrint = 0;
+const floats = [];
+const floatsLate = [];
+for (let fi = 0; fi < log.length; fi++) {
+    const f = log[fi];
     if (f.speed < 0.5 || f.stand > 0.05) continue;
     for (const foot of ["r", "l"]) {
         // WHICH foot is in contact comes from the phase; WHETHER it is touching comes
@@ -246,11 +280,31 @@ for (const f of log) {
         if (phase < EDGE || phase > f.duty - EDGE) continue;
         groundChecked++;
         // An ankle sits P.ankle = 0.09 m above the sole of the foot under it.
-        const clearance = f[foot][1] - 0.09 - (foot === "r" ? f.rg : f.lg);
+        const drawn = foot === "r" ? f.rg : f.lg;
+        const raw = foot === "r" ? f.rgRaw : f.lgRaw;
+        const clearance = f[foot][1] - 0.09 - drawn;
+        floats.push(clearance);
+        // Late stance only. A boot landing on snow compresses it, so the first slice of
+        // every contact is the ground giving way underneath a foot that is already on it.
+        // Whether it SETTLES is a different question from how long settling takes, and
+        // conflating the two makes both unanswerable.
+        if (since[foot][fi] > settleBy) floatsLate.push(clearance);
         if (clearance > worstFloat) worstFloat = clearance;
         if (-clearance > worstSink) worstSink = -clearance;
+        rawClears.push(f[foot][1] - 0.09 - raw);
+        if (raw - drawn > deepestPrint) deepestPrint = raw - drawn;
     }
 }
+floats.sort((a, b) => a - b);
+floatsLate.sort((a, b) => a - b);
+const lq = (q) => floatsLate[Math.min(floatsLate.length - 1, Math.floor(q * floatsLate.length))] ?? 0;
+const fq = (q) => floats[Math.min(floats.length - 1, Math.floor(q * floats.length))] ?? 0;
+// Fraction of contact spent more than a couple of centimetres off the surface. The peak
+// is not the interesting number: a print is stamped on the same frame the foot lands, so
+// the ground drops ten centimetres out from under a boot that is already on it and the
+// foot spends a few milliseconds catching up. That is the snow compressing, and it is
+// meant to be there. What would be a bug is the foot STAYING up.
+const offGround = floats.filter((v) => v > 0.02).length / Math.max(floats.length, 1);
 
 // --- 4. stride length actually walked -------------------------------------
 //
@@ -273,7 +327,14 @@ console.log(`stance drift p50/p90 ${pct(p(0.5))} / ${pct(p(0.9))}`);
 console.log(`body travel/frame  ${pct(bodyStep)}   <- a foot carried along would move this much every frame`);
 console.log(`prints             ${printsChecked}, worst distance to nearest ankle ${pct(worstPrint)}`);
 console.log(`stride measured    ${measured.toFixed(3)} m   (setting ${stride}, stance width ${stance})`);
-console.log(`contact foot vs ground  float up to ${pct(worstFloat)}, sink up to ${pct(worstSink)}  (${groundChecked} samples)`);
+console.log(`contact foot vs drawn ground   float p50 ${pct(fq(0.5))}, p90 ${pct(fq(0.9))}, peak ${pct(worstFloat)}; sink ${pct(worstSink)}`);
+console.log(`  ${settleBy.toFixed(0)} ms after contact onward     float p50 ${pct(lq(0.5))}, p90 ${pct(lq(0.9))}  <- has it settled`);
+console.log(`  off the surface by >2 cm        ${(offGround * 100).toFixed(1)}% of contact (${groundChecked} samples)  <- the snow compressing`);
+rawClears.sort((a, b) => a - b);
+const medianRaw = rawClears[Math.floor(rawClears.length / 2)] ?? 0;
+console.log(`  vs the UNDISTURBED heightfield  ${pct(-medianRaw)} below it  <- where the foot would have floated`);
+console.log(`  deepest print stood in          ${pct(deepestPrint)}`);
+console.log(`  ground probe round trip         ${probeLatency.toFixed(1)} ms  <- the age of what it is standing on`);
 if (errors.length > 0) console.log(`page errors: ${errors.join(" | ")}`);
 
 // A planted foot may move by the numerical noise of the terrain sample under it and no
@@ -282,12 +343,19 @@ if (errors.length > 0) console.log(`page errors: ${errors.join(" | ")}`);
 const slideOk = worstSlide < 0.01;
 const printOk = worstPrint < 0.25;
 const strideOk = printsChecked > 2 && Math.abs(measured - stride) < 0.08;
-const groundOk = worstFloat < 0.08 && worstSink < 0.08;
+// The foot must REST on the drawn surface, judged over the whole contact rather than at
+// its peak: the peak is the compression transient on the frame the print is stamped.
+const groundOk = lq(0.9) < 0.025 && worstSink < 0.05;
+// The point of pass C: the foot must be on the DRAWN surface, and that has to be a
+// different surface from the undisturbed one, or the run carved nothing and proved
+// nothing. Snow at the default foot depth prints about 5 cm.
+const printOk2 = deepestPrint > 0.015;
 
 console.log("");
 console.log(`planted foot holds     ${slideOk ? "PASS" : "FAIL"}`);
 console.log(`prints under the feet  ${printOk ? "PASS" : "FAIL"}`);
 console.log(`stride is the setting  ${strideOk ? "PASS" : "FAIL"}`);
 console.log(`stands on the surface  ${groundOk ? "PASS" : "FAIL"}`);
+console.log(`stands in its own print ${printOk2 ? "PASS" : "FAIL"}`);
 
-process.exit(slideOk && printOk && strideOk && groundOk ? 0 : 1);
+process.exit(slideOk && printOk && strideOk && groundOk && printOk2 ? 0 : 1);

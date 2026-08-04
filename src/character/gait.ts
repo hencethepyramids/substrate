@@ -1,6 +1,7 @@
 import type { Settings } from "../core/settings";
 import type { Mover } from "../core/mover";
 import type { Heightfield } from "../terrain/heightfield";
+import type { GroundProbe } from "../substrate/groundProbe";
 import { Skeleton, B, P, THIGH, SHIN, LEG, UPPER_ARM } from "./skeleton";
 
 /**
@@ -45,6 +46,17 @@ const DUTY_RUN = 0.4;
 /** How fast the figure settles into a standing pose once it stops, per second. */
 const SETTLE_RATE = 9;
 
+/**
+ * How fast a planted foot follows ground that gives way beneath it, per second.
+ *
+ * THIS IS ANTI-POP, NOT SOIL MECHANICS. The stamp is instantaneous in the model, so
+ * without any damping a boot drops the full depth of its own print in a single frame. A
+ * time constant of ten milliseconds spreads that over a couple of frames and no more —
+ * anything slower is a foot failing to keep up with ground it is supposed to be standing
+ * on, which at a sprint is most of the contact, because a sprint's stance is 78 ms long.
+ */
+const SINK_RATE = 100;
+
 /** Below this the walk cycle has nothing to phase on, and the figure simply stands. */
 const MOVING_SPEED = 0.25;
 
@@ -62,6 +74,7 @@ export class Gait {
 
     private readonly _settings: Settings;
     private readonly _field: Heightfield;
+    private _probe: GroundProbe | null = null;
 
     /** Cycle index per foot: 0 is the right, 1 the left. */
     private readonly _cycle = new Int32Array(2);
@@ -69,6 +82,8 @@ export class Gait {
     private readonly _plant = new Float32Array(6);
     /** Where each ankle is now, world space. */
     private readonly _ankle = new Float32Array(6);
+    /** The same ankles in character space, so the pelvis and the legs share one answer. */
+    private readonly _ankleChar = new Float32Array(6);
     /** Phase within each foot's own cycle, 0 at contact. */
     private readonly _phase = new Float32Array(2);
 
@@ -92,6 +107,25 @@ export class Gait {
         this._settings = settings;
         this._field = field;
         for (let i = 0; i < MAX_PLANTS; i++) this.plants.push({ x: 0, z: 0, load: 1 });
+    }
+
+    /**
+     * Give the gait the CPU window of the substrate, so feet land on the ground the
+     * character has carved rather than on the one underneath it. Called from main once
+     * both exist. Without it the gait still runs — on the undisturbed heightfield.
+     */
+    setProbe(probe: GroundProbe): void {
+        this._probe = probe;
+    }
+
+    /**
+     * The height of the surface that is actually DRAWN: the heightfield less whatever has
+     * been taken out of it. Everything in this file that asks where the ground is asks
+     * here, so a print, a carve and a wake all hold the foot that finds them.
+     */
+    groundAt(x: number, z: number): number {
+        const h = this._field.sampleHeight(x, z);
+        return this._probe === null ? h : h - this._probe.depressionAt(x, z);
     }
 
     /** Phase within a foot's own cycle, 0 at contact. 0 is the right foot, 1 the left. */
@@ -222,10 +256,23 @@ export class Gait {
             let ay: number;
             let az: number;
             if (t < duty) {
-                // Stance. The foot IS the plant — it does not move at all.
+                // Stance. The foot IS the plant in X and Z — that is the no-sliding claim
+                // and it does not bend.
                 ax = px;
-                ay = py;
                 az = pz;
+                // BUT IT SINKS. The plant's height is recorded at the moment of contact,
+                // which is before the print exists — the carve pass stamps it on the same
+                // frame and the relaxation deepens it over the next few. Holding the foot
+                // at the height the ground USED to be leaves the boot hanging over its own
+                // print by the full depth of it, which measured at 10.7 cm in snow.
+                //
+                // So the foot follows the surface down, damped rather than teleported,
+                // because snow gives way under a boot over a few tens of milliseconds and
+                // an instant drop reads as a pop. Horizontally fixed, vertically live: the
+                // ground is allowed to move under a planted foot, and it does.
+                const settled = this.groundAt(px, pz) + P.ankle;
+                const prev = this._ankle[i * 3 + 1];
+                ay = dt > 0 ? prev + (settled - prev) * (1 - Math.exp(-SINK_RATE * dt)) : settled;
             } else {
                 const u = (t - duty) / (1 - duty);
                 // Where the body will be when this foot next touches down. Recomputed
@@ -237,10 +284,10 @@ export class Gait {
                 const ease = u * u * (3 - 2 * u);
                 ax = px + (tx - px) * ease;
                 az = pz + (tz - pz) * ease;
-                const ty = this._field.sampleHeight(tx, tz) + P.ankle;
+                const ty = this.groundAt(tx, tz) + P.ankle;
                 ay = py + (ty - py) * ease + Math.sin(Math.PI * u) * lift;
                 // Never through a rise the swing happens to cross.
-                const here = this._field.sampleHeight(ax, az) + P.ankle;
+                const here = this.groundAt(ax, az) + P.ankle;
                 if (ay < here) ay = here;
             }
 
@@ -257,7 +304,7 @@ export class Gait {
             // is also what stopping actually looks like: you finish the step you were
             // taking, you do not slide the one you were standing on.
             if (this._stand > 0.001 && t >= duty) {
-                const ny = this._field.sampleHeight(neutralX, neutralZ) + P.ankle;
+                const ny = this.groundAt(neutralX, neutralZ) + P.ankle;
                 ax += (neutralX - ax) * this._stand;
                 ay += (ny - ay) * this._stand;
                 az += (neutralZ - az) * this._stand;
@@ -273,7 +320,7 @@ export class Gait {
 
     private _setPlant(i: number, x: number, z: number): void {
         this._plant[i * 3] = x;
-        this._plant[i * 3 + 1] = this._field.sampleHeight(x, z) + P.ankle;
+        this._plant[i * 3 + 1] = this.groundAt(x, z) + P.ankle;
         this._plant[i * 3 + 2] = z;
     }
 
@@ -282,6 +329,17 @@ export class Gait {
         const s = this._settings.v;
         const sk = this.skeleton;
         const moving = 1 - this._stand;
+
+        // The ankles, brought into character space once. Both the pelvis and the leg solve
+        // need them, and computing them twice is how the two end up disagreeing about
+        // where a foot is.
+        for (let i = 0; i < 2; i++) {
+            const dx = this._ankle[i * 3] - this._px;
+            const dz = this._ankle[i * 3 + 2] - this._pz;
+            this._ankleChar[i * 3] = dx * this._cos - dz * this._sin;
+            this._ankleChar[i * 3 + 1] = this._ankle[i * 3 + 1] - this._py;
+            this._ankleChar[i * 3 + 2] = dx * this._sin + dz * this._cos;
+        }
 
         // --- pelvis ---------------------------------------------------------
         //
@@ -303,10 +361,32 @@ export class Gait {
         // Forward lean grows with speed. The bank into a turn is the real balance angle
         // — tan(bank) = v * omega / g, the sum a cyclist does — so it falls out of how
         // fast the character is actually turning rather than out of a curve someone drew.
-        const leanZ = Math.tan(s["char.lean"] * DEG) * Math.min(speedRatio, 2.4) * moving;
+        //
+        // Climbing adds to it, because you lean into a hill for the same reason you lean
+        // into speed: the line from your feet through your centre of mass has to stay
+        // over the ground you are pushing against.
+        const climb = clampAbs(this._slopeAlong(this._px, this._pz, this._sin, this._cos, 0.5), 0.8);
+        const leanZ = (Math.tan(s["char.lean"] * DEG) * Math.min(speedRatio, 2.4) * moving + climb * 0.32) * 1;
         const leanX = clampAbs((mover.speed * this._turn) / G, 0.55) * s["char.bank"];
 
-        const pelvisY = standY - bob;
+        // NEVER ASK A LEG FOR MORE THAN IT HAS. The bob above is the flat-ground case of a
+        // general constraint: the pelvis can be no higher above either ankle than a leg can
+        // span at that horizontal distance. On a slope, in a hole, or over a print the
+        // character has just stamped, the two feet sit at different heights and the bob
+        // alone leaves the lower leg straight and still short — the foot hanging above its
+        // own print, which is precisely the thing this pass exists to fix. So the same
+        // triangle that gives the bob also gives a cap, and the cap only ever binds when
+        // the ground is doing something the flat case did not anticipate.
+        let cap = Infinity;
+        for (let i = 0; i < 2; i++) {
+            const dx = this._ankleChar[i * 3] - sway;
+            const dz = this._ankleChar[i * 3 + 2];
+            const flat = Math.sqrt(dx * dx + dz * dz);
+            const reach = Math.sqrt(Math.max(LEG * LEG - flat * flat, 0)) * 0.99;
+            cap = Math.min(cap, this._ankleChar[i * 3 + 1] + reach);
+        }
+
+        const pelvisY = Math.min(standY - bob, cap);
         sk.setHead(B.pelvis, sway, pelvisY, 0);
         sk.setDir(B.pelvis, leanX, 1, leanZ);
 
@@ -375,13 +455,11 @@ export class Gait {
         const sk = this.skeleton;
         const side = i === 0 ? 1 : -1;
 
-        // The ankle is tracked in world space so a planted foot cannot drift. Bringing it
-        // into character space is one yaw and one translation.
-        const dxw = this._ankle[i * 3] - this._px;
-        const dzw = this._ankle[i * 3 + 2] - this._pz;
-        const ax = dxw * this._cos - dzw * this._sin;
-        const az = dxw * this._sin + dzw * this._cos;
-        const ay = this._ankle[i * 3 + 1] - this._py;
+        // The ankle is tracked in world space so a planted foot cannot drift; `_pose` has
+        // already brought both into character space, and this reads that one answer.
+        const ax = this._ankleChar[i * 3];
+        const ay = this._ankleChar[i * 3 + 1];
+        const az = this._ankleChar[i * 3 + 2];
 
         let tx = ax - hx;
         let ty = ay - hy;
@@ -447,10 +525,24 @@ export class Gait {
         const t = this._phase[i];
         const duty = this._duty;
         const roll = this._settings.v["char.footRoll"] * DEG;
-        const pitch =
+        const gaitPitch =
             (t < duty ? roll * smoothstep(0.55, 1, t / duty) : -roll * 0.7 * Math.sin((Math.PI * (t - duty)) / (1 - duty))) *
             (1 - this._stand) *
             Math.min(0.7 + 0.3 * speedRatio, 1.5);
+
+        // AND THE GROUND'S OWN PITCH. A sole that stays level while the hill under it does
+        // not is the tell that a character is walking on an idea of the terrain rather
+        // than on the terrain — one half of the foot sinks in and the other floats. The
+        // slope is measured along the foot's own forward direction on the DRAWN surface,
+        // so a print, a carve and a hillside all tilt it the same way.
+        //
+        // Pitch only, not roll: the bone's orientation comes from a shortest-arc rotation
+        // onto its direction, which leaves the twist about that direction undetermined by
+        // construction. Sideways tilt needs a frame the rig does not carry.
+        const wx = this._ankle[i * 3];
+        const wz = this._ankle[i * 3 + 2];
+        const ground = clampAbs(this._slopeAlong(wx, wz, this._sin, this._cos, P.toeZ), 0.7);
+        const pitch = gaitPitch - Math.atan(ground);
 
         const fi = foot * 3;
         const ry = sk.restDir[fi + 1];
@@ -459,6 +551,22 @@ export class Gait {
         const sp = Math.sin(pitch);
         sk.setHead(foot, ax, ay, az);
         sk.setDir(foot, sk.restDir[fi], ry * cp - rz * sp, ry * sp + rz * cp);
+    }
+
+    /**
+     * Rise per metre of the DRAWN surface along a horizontal direction, measured over a
+     * span rather than differentiated at a point.
+     *
+     * A central difference over a real distance is what makes this usable: the substrate
+     * window is 6 cm texels and its bilinear surface has derivative jumps at every one of
+     * them, so a point derivative would have the foot flicking between texel slopes as it
+     * crossed. Measuring over the length of the thing being tilted asks the question at
+     * the scale it is being asked about.
+     */
+    private _slopeAlong(x: number, z: number, dirX: number, dirZ: number, span: number): number {
+        const ahead = this.groundAt(x + dirX * span, z + dirZ * span);
+        const behind = this.groundAt(x - dirX * span, z - dirZ * span);
+        return (ahead - behind) / (2 * span);
     }
 
     /** Shoulder, elbow and hand from two angles. A round limb needs no IK to read. */

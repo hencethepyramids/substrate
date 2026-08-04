@@ -42,3 +42,10 @@ as boxes first.
   knee bends without a crease because the rings across it share both bones.
 - `phase7-loft-desert.png` — desert, sun 14, walking. The whole thing at once — the
   articulated cast shadow, the prints trailing behind, and the dunes from Phase 1.
+
+Pass C put the character on the ground it carves.
+
+- `phase7-ground-snow.png` — snow, sun 20, close, mid-stride. The planted foot is down
+  inside its own print with the rim of it visible around the boot. Before this pass the
+  foot stood at the original ground height and the print was drawn below it.
+- `phase7-ground-desert.png` — desert, sun 16, walking.
