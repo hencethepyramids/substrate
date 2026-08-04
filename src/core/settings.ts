@@ -176,6 +176,7 @@ export const SCHEMA = {
     "fire.igniteRate": num({ group: "Fire", label: "Ignite rate", def: 3, min: 0.1, max: 20, step: 0.1, unit: "/s", hint: "Heat poured in per second while igniting. Normalised: 1 is as hot as this world gets." }),
     "fire.igniteSeconds": num({ group: "Fire", label: "Ignite duration", def: 1.5, min: 0.05, max: 10, step: 0.05, unit: "s", hint: "An ignition is a press, not a permanent flame. What happens afterwards is the element's business. In SECONDS, so it does not get four times hotter on a faster machine." }),
     "fire.lightPool": num({ group: "Fire", label: "Light pool", def: 14, min: 0, max: 60, step: 0.5, hint: "How brightly molten ground lights what is around it. Reads high because basalt's albedo is 0.09 — the pool is multiplied by what it is falling on, and volcanic ground is nearly black. Costs nothing in snow or desert, whose emissive gain is zero, so the taps never happen." }),
+    "fire.crust": num({ group: "Fire", label: "Crust", def: 1, min: 0, max: 1, step: 0.01, hint: "How much of the glow is hidden behind cooled plates. 0 is a uniformly molten disc, which is the wrong shape for lava however well its brightness is tuned." }),
     "fire.lightRadius": num({ group: "Fire", label: "Light pool radius", def: 6, min: 0.5, max: 24, step: 0.5, unit: "m" }),
 
     // -- Surface -------------------------------------------------------------

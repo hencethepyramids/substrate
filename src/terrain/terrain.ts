@@ -1,7 +1,7 @@
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { Vector2, Vector4 } from "@babylonjs/core/Maths/math.vector";
+import { Vector2, Vector3, Vector4 } from "@babylonjs/core/Maths/math.vector";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
@@ -46,7 +46,7 @@ export class Terrain {
     private readonly _params = new Vector4(0, 0, 0, 0);
     private readonly _surface = new Vector4(0, 0, 0, 0);
     private readonly _grain = new Vector4(0, 0, 0, 0);
-    private readonly _pool = new Vector2(0, 0);
+    private readonly _pool = new Vector3(0, 0, 0);
     private readonly _albedo = new Color3(1, 1, 1);
     private readonly _albedoCompacted = new Color3(1, 1, 1);
     private readonly _albedoSteep = new Color3(0.5, 0.5, 0.5);
@@ -205,8 +205,8 @@ export class Terrain {
         m.setColor3("fSubsurfaceTint", this._subsurfaceTint);
         this._grain.set(surf.glintDensity, surf.glintBasis, s["surface.glintStrength"], surf.emissiveGain);
         m.setVector4("fGrain", this._grain);
-        this._pool.set(s["sys.lightPool"] ? s["fire.lightPool"] : 0, s["fire.lightRadius"]);
-        m.setVector2("fPool", this._pool);
+        this._pool.set(s["sys.lightPool"] ? s["fire.lightPool"] : 0, s["fire.lightRadius"], s["fire.crust"]);
+        m.setVector3("fPool", this._pool);
         this._air?.pushTo(m);
         this._airborne?.bindTo(m);
         this._fire?.bindTo(m);

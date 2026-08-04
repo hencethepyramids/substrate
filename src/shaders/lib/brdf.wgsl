@@ -152,6 +152,45 @@ fn sbGlints(worldXZ: vec2f, n: vec3f, h: vec3f, density: f32, basis: f32, dist: 
 /// unmistakably hotter than daylight while keeping its hue.
 const SB_EMISSIVE_PEAK: f32 = 1.8;
 
+/// Scale of the crust plates, in cycles per metre. About a two-metre plate.
+const SB_CRUST_FREQ: f32 = 0.5;
+/// How wide a crack is at the coldest and the hottest. Hot rock cannot hold a skin
+/// together, so its cracks are wider and its plates smaller.
+const SB_CRACK_COLD: f32 = 0.035;
+const SB_CRACK_HOT: f32 = 0.14;
+/// What the crust itself still emits. Not zero — cooled basalt over molten rock glows
+/// dully rather than going black, and a hard zero reads as paint.
+const SB_CRUST_FLOOR: f32 = 0.07;
+
+/// Fraction of its light a cracked crust lets out, averaged over an area.
+///
+/// The light pool integrates PHASE — how molten the ground is — but what actually
+/// escapes is phase times the crust, and the crust hides most of it. Without this the
+/// pool lit the plates almost as brightly as the cracks and the whole point of having
+/// crust was washed straight back out. Cracks cover roughly a fifth to a third of the
+/// area depending on heat, so with a floor of 0.07 under them this lands near 0.3.
+const SB_CRUST_MEAN: f32 = 0.3;
+
+/// The skin over molten rock, and the cracks that let the light out.
+///
+/// A uniformly glowing disc is the wrong SHAPE for lava however well its magnitude is
+/// tuned — the thing that makes lava read as lava is that most of it is dark, cooled
+/// crust, and the glow comes out of a network of cracks between the plates.
+///
+/// Those cracks are the zero-crossings of gradient noise: `abs(n)` near zero traces a
+/// connected web of curved lines, which is exactly how a cooling skin fractures, and it
+/// costs two noise evaluations rather than a texture. Two octaves so the plates are not
+/// all one size.
+///
+/// Returns 1 in a crack and 0 on a plate. Requires <substrateNoise>.
+fn sbCrust(worldXZ: vec2f, heat: f32) -> f32 {
+    let a = sbNoiseD(worldXZ * SB_CRUST_FREQ).x;
+    let b = sbNoiseD(worldXZ * (SB_CRUST_FREQ * 2.7) + vec2f(19.3, 7.1)).x;
+    let lines = min(abs(a), abs(b) * 1.6);
+    let width = mix(SB_CRACK_COLD, SB_CRACK_HOT, clamp(heat, 0.0, 1.0));
+    return smoothstep(width, 0.0, lines);
+}
+
 fn sbEmissive(phase: f32, gain: f32) -> vec3f {
     let t = clamp(phase, 0.0, 1.0);
     // A crude blackbody walk: dull red, through orange, toward white-hot. Quadratic in

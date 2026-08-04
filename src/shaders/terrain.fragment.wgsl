@@ -38,8 +38,8 @@ uniform fSurface: vec4f;
 uniform fSubsurfaceTint: vec3f;
 // x: glints per square metre, y: glint lattice basis, z: glint strength, w: emissive gain.
 uniform fGrain: vec4f;
-/// x: light-pool strength, y: its radius in metres.
-uniform fPool: vec2f;
+/// x: light-pool strength, y: its radius in metres, z: how much crust covers the glow.
+uniform fPool: vec3f;
 
 /// Packed material is smoother than the loose material it was made from, so a print in
 /// snow catches a highlight the powder around it does not. One more thing the compaction
@@ -264,18 +264,28 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // drift from the sky it is a reflection of.
         color = color + (specular + glint) * sbSunIrradiance() * shadow;
 
-        // Emission, and the light it casts on everything near it.
-        //
-        // The pool is gated on the element's own emissive gain, which is a UNIFORM — so
-        // snow and desert, whose gain is zero, never take the seven taps at all. Molten
-        // rock lighting the ground around it is the difference between hot material and
-        // a glowing decal, and the pool is what the fire debug view cannot show you.
-        color = color + sbEmissive(sub.phase, uniforms.fGrain.w);
-        if (uniforms.fGrain.w > 0.0 && uniforms.fPool.x > 0.0) {
-            let pool = sbHeatPool(input.vWorld.xz, uniforms.fPool.y) * uniforms.fPool.x;
-            // Tinted by what fully molten material glows, so the pool and the thing
-            // casting it are the same colour by construction rather than by agreement.
-            color = color + albedo * sbEmissive(1.0, uniforms.fGrain.w) * pool;
+        // Emission, the crust it comes through, and the light it casts on everything
+        // near it. All of it gated on the element's own emissive gain, which is a
+        // UNIFORM — so snow and desert, whose gain is zero, take none of these taps.
+        if (uniforms.fGrain.w > 0.0) {
+            let fire = sbFireAt(input.vWorld.xz);
+            // Most of a lava flow is dark. The glow comes out of the cracks between
+            // cooled plates, and the crust is why a molten patch reads as rock that is
+            // too hot rather than as a light someone left on under the ground.
+            let crack = mix(1.0, mix(SB_CRUST_FLOOR, 1.0, sbCrust(input.vWorld.xz, fire.heat)), uniforms.fPool.z);
+            color = color + sbEmissive(sub.phase, uniforms.fGrain.w) * crack;
+
+            // Molten rock lighting the ground around it is the difference between hot
+            // material and a glowing decal. This is what no debug view can show you.
+            if (uniforms.fPool.x > 0.0) {
+                // Scaled by how much light a crust lets out on average, so the pool and
+                // the surface it is cast by stay consistent as the crust dial moves.
+                let escapes = mix(1.0, SB_CRUST_MEAN, uniforms.fPool.z);
+                let pool = sbHeatPool(input.vWorld.xz, uniforms.fPool.y) * uniforms.fPool.x * escapes;
+                // Tinted by what fully molten material glows, so the pool and the thing
+                // casting it are the same colour by construction, not by agreement.
+                color = color + albedo * sbEmissive(1.0, uniforms.fGrain.w) * pool;
+            }
         }
 
         // Aerial perspective. Extinction over the path, in-scatter the colour the air

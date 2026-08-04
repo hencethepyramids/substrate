@@ -574,10 +574,27 @@ because `phase` was zero until Phase 6 existed to write it; the first time it ra
 several metres of ground at radiance 2 and AgX did exactly what AgX is for, rolling it
 off into a flat white hole. 1.8 keeps its hue against a reference surface of 1.0.
 
-The core still reads pale rather than saturated, which is AgX desaturating a genuinely
-very bright source and is not far off how lava photographs. What it actually needs is
-**crust**: a uniform molten disc is the wrong shape for lava, and dark crust broken by
-glowing cracks is what pass C is for.
+#### Pass C, crust — landed
+
+A uniform molten disc is the wrong **shape** for lava however well its brightness is
+tuned, and no amount of magnitude fixes that. What makes lava read as lava is that most
+of it is dark, cooled plate, and the glow comes out of a network of cracks between them.
+
+The cracks are the **zero-crossings of gradient noise** — `abs(n)` near zero traces a
+connected web of curved lines, which is how a cooling skin actually fractures, and it
+costs two noise evaluations rather than a texture. Two octaves so the plates are not all
+one size, and the crack width scales with heat, because hot rock cannot hold a skin
+together. See [shots/phase6-crust-volcanic.png](shots/phase6-crust-volcanic.png).
+
+**The light pool had to learn about it.** The pool integrates `phase` — how molten the
+ground is — but what escapes is phase *times the crust*, and the crust hides most of it.
+Left alone it lit the plates almost as brightly as the cracks and washed the whole point
+of having crust straight back out. It is now scaled by the crust's mean transmission, so
+the pool and the surface casting it stay consistent as the `fire.crust` dial moves.
+
+#### Pass D, smoke and embers — next
+
+`sys.smoke` and `sys.embers` are still reserved with nothing behind them.
 
 ### Controls
 
