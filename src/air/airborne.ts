@@ -183,6 +183,7 @@ export class Airborne {
         this._air.pushTo(target);
         pushSubstrateParams(target, this._element);
         target.setVector4("abStep", this._step);
+        target.setFloat("abThreshold", this._settings.v["airborne.threshold"]);
     }
 
     private _clear(): void {

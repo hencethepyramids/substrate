@@ -459,10 +459,15 @@ the two to disagree about where a cell is.
 
 Three things happen, and they are the whole of aeolian transport:
 
-- **Lift** — loose material past `liftThreshold`, where the shear is high enough, leaves
-  the ground at a rate set by `windSusceptibility`. Those two numbers have been sitting
-  in `SubstrateParams` since Phase 0 waiting for this, and between them they are why ash
-  goes up in a breeze and packed snow does not.
+- **Lift** — loose material past `liftThreshold`, where the wind is *actually* fast
+  enough, leaves the ground at a rate set by `windSusceptibility`. Those two numbers have
+  been sitting in `SubstrateParams` since Phase 0 waiting for this, and between them they
+  are why ash goes up in a breeze and packed snow does not. It is driven by the excess of
+  wind **speed** over a fluid threshold, times the speed — which is why aeolian transport
+  is so violently sensitive to weather. The first version drove it from `shear`, which is
+  a *ratio* to the free stream and sits near 1 on flat ground whatever the weather is
+  doing: a gale and a breeze lifted identically and half the field never lifted at all.
+  The `airborne` view was simply black, and stayed black until it was measured.
 - **Ride** — semi-Lagrangian advection, so a gale cannot outrun the timestep the way
   explicit advection would. The CFL limit stops being a limit.
 - **Settle** — suspension survives where the air is moving and drops out where it has

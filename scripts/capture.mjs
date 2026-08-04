@@ -110,6 +110,30 @@ try {
     log.push(`BOOT FAILED: ${err.message}`);
 }
 
+// Optionally break the ground first. Nothing is airborne over undisturbed terrain —
+// the substrate starts empty, there is no loose mass, and every transport view is
+// correctly black. So a carve is the setup for most of Phase 5's questions.
+const carves = Number(argv.get("carve") ?? 0);
+if (carves > 0) {
+    await page.evaluate(async (n) => {
+        const app = window.__substrate;
+        const wait = () => new Promise((r) => requestAnimationFrame(() => r()));
+        // A line laid ACROSS the wind, upwind of the camera, so its plume blows into
+        // view rather than away from it.
+        const w = app.air.base;
+        const speed = Math.hypot(w.x, w.y) || 1;
+        const dir = { x: w.x / speed, y: w.y / speed };
+        const across = { x: -dir.y, y: dir.x };
+        for (let i = 0; i < n; i++) {
+            const t = (i - n / 2) * 1.1;
+            const x = across.x * t - dir.x * 9;
+            const z = across.y * t - dir.y * 9;
+            app.substrate.stamp(x, z, 0.9, 0.5);
+            await wait();
+        }
+    }, carves);
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 

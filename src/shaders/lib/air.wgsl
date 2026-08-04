@@ -26,9 +26,14 @@ const SB_AIR_RECIRC: f32 = 0.22;
 struct SbAir {
     /// Full velocity in m/s. The vertical component follows the surface.
     velocity: vec3f,
-    /// Surface shear relative to the free stream. THIS is what lifts material: it is
-    /// high on a windward face and collapses to nothing in a lee.
+    /// Surface shear RELATIVE to the free stream, so about 1 on flat ground. Good for
+    /// asking "is this face scoured or sheltered", useless for asking "is the wind
+    /// strong enough to pick anything up" — it is a ratio, and it does not know how hard
+    /// the wind is blowing.
     shear: f32,
+    /// Horizontal speed in m/s. THIS is what lifts material, because a threshold has to
+    /// be compared against a speed and not against a ratio.
+    speed: f32,
     /// 0 attached, 1 fully separated.
     separated: f32,
 };
@@ -80,6 +85,7 @@ fn sbAirAt(worldXZ: vec2f, deriv: vec2f) -> SbAir {
     var air: SbAir;
     air.velocity = vec3f(horizontal.x, dot(horizontal, deriv), horizontal.y);
     air.shear = speedup * gust * (1.0 - sep);
+    air.speed = length(horizontal);
     air.separated = sep;
     return air;
 }

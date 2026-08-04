@@ -32,8 +32,10 @@ uniform abStep: vec4f;
 /// computes it: old = new + shift.
 uniform abShift: vec2f;
 
-/// Shear below which nothing is held up any more. Above it, suspension survives.
-const AB_HOLD_SHEAR: f32 = 1.0;
+/// Wind speed, in m/s, at which material starts to move — the fluid threshold. Below it
+/// nothing is picked up no matter how long you wait, which is why a still day leaves a
+/// dune alone.
+uniform abThreshold: f32;
 /// How much of the settling a fully attached, fully sheared flow suppresses.
 const AB_HOLD_MAX: f32 = 0.85;
 /// Ceiling on suspended load, metres equivalent. Whiteout, not a singularity.
@@ -81,15 +83,23 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // where the flow still has shear to give. This is the one place windSusceptibility
     // and liftThreshold are read, and between them they are why ash leaves the ground in
     // a breeze and packed snow does not.
+    // AGAINST A SPEED, NOT A RATIO. `shear` is relative to the free stream and sits at
+    // about 1 on flat ground whatever the weather is doing, so driving lift from it made
+    // a gale and a breeze identical and let half the field never lift at all. Transport
+    // goes as the excess over the fluid threshold times the speed itself — quadratic-ish,
+    // which is why aeolian transport is so violently sensitive to wind speed.
+    let thresh = max(uniforms.abThreshold, 0.1);
+    let excess = max(air.speed - thresh, 0.0);
+    let drive = (excess * air.speed) / (thresh * thresh) * (1.0 - air.separated);
+
     let ground = sbSubTexel(c);
     let loose = max(ground.g - uniforms.spLiftThreshold, 0.0);
-    let drive = max(air.shear - 1.0, 0.0) * (1.0 - air.separated);
     let lift = min(loose, loose * drive * uniforms.spWindSusceptibility * uniforms.abStep.z * dt);
 
     // SETTLE. Suspension survives where the air is moving and drops out where it has
     // slowed or detached. That asymmetry is the entire reason material accumulates on a
     // slip face rather than being carried onward forever.
-    let hold = clamp(air.shear / AB_HOLD_SHEAR, 0.0, 1.0) * (1.0 - air.separated);
+    let hold = clamp(air.speed / thresh, 0.0, 1.0) * (1.0 - air.separated);
     let settle = min(density + lift, (density + lift) * uniforms.abStep.w * (1.0 - hold * AB_HOLD_MAX) * dt);
 
     density = clamp(density + lift - settle, 0.0, AB_MAX_DENSITY);
