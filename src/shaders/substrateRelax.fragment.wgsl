@@ -18,6 +18,12 @@ varying vUV: vec2f;
 var srPrevSampler: sampler;
 var srPrev: texture_2d<f32>;
 
+/// Last frame's airborne buffer. Only its G channel is read: what the air owes the
+/// ground. The airborne pass never edits the substrate itself — it records the debt and
+/// this pass pays it, so the ground stays the only thing that writes the ground.
+var srAirborneSampler: sampler;
+var srAirborne: texture_2d<f32>;
+
 /// Texels across the window.
 uniform srSize: f32;
 /// Metres per texel.
@@ -88,6 +94,19 @@ fn srPrevAt(c: vec2i) -> vec4f {
     let m = i32(uniforms.srSize) - 1;
     let inside = all(p >= vec2i(0, 0)) && all(p <= vec2i(m, m));
     return select(vec4f(0.0), textureLoad(srPrev, clamp(p, vec2i(0, 0), vec2i(m, m)), 0), inside);
+}
+
+/// What the air owes this texel, from last frame's airborne step.
+///
+/// Shifted exactly as srPrevAt is: that buffer was written in LAST frame's window, so
+/// the same whole-texel scroll applies. Reading it unshifted would drag every deposit
+/// backwards across the ground at walking pace.
+fn srOwedAt(c: vec2i) -> f32 {
+    let p = c + vec2i(round(uniforms.srShift));
+    let m = i32(uniforms.srSize) - 1;
+    let inside = all(p >= vec2i(0, 0)) && all(p <= vec2i(m, m));
+    let v = textureLoad(srAirborne, clamp(p, vec2i(0, 0), vec2i(m, m)), 0).g;
+    return select(0.0, v, inside);
 }
 
 fn srWorldOf(c: vec2i) -> vec2f {
@@ -225,6 +244,22 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // Arriving material fills the hollow, and it is loose when it lands.
     s.x = s.x - inflow;
     s.y = s.y + inflow;
+
+    // SETTLE THE DEBT WITH THE AIR. Positive is material coming back down, which raises
+    // the surface and therefore reduces the depression, and it lands loose. Negative is
+    // material that left.
+    //
+    // THE EXCHANGE ITSELF IS EXACT — the airborne pass moves precisely this much the
+    // other way, so lift and settle cannot invent or destroy anything between them.
+    // Ground plus air is nonetheless NOT conserved overall, and it is worth knowing why
+    // rather than assuming otherwise: material blows out through the window's open
+    // boundary, and the advection is semi-Lagrangian on a divergent 2D field, which only
+    // approximates the vertical flux it is standing in for. Measured by
+    // scripts/checkConserve.mjs. Losing to the wind is a tuning matter; the version that
+    // CREATED material at 50% per ten seconds was not, and that one is fixed.
+    let owed = srOwedAt(c);
+    s.x = s.x - owed;
+    s.y = s.y + owed;
 
     // Isotropic creep. Cohesion resists it exactly as it resists slump, so one number
     // per element governs both rather than two that can be tuned into disagreement.

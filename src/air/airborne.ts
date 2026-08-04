@@ -129,6 +129,16 @@ export class Airborne {
         material.setTexture("sbAirborneTex", this._targets[this._front]);
     }
 
+    /**
+     * The same buffer, under the name the relaxation pass reads it by. That pass takes
+     * only the exchange channel, and it takes it through its own texel-shifted load
+     * rather than through substrateAirborne — including that header would oblige it to
+     * bind the substrate texture it is itself writing.
+     */
+    bindExchangeTo(target: { setTexture(name: string, texture: ProceduralTexture): unknown }): void {
+        target.setTexture("srAirborne", this._targets[this._front]);
+    }
+
     dispose(): void {
         for (const off of this._disposers) off();
         this._disposers.length = 0;

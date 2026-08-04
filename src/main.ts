@@ -97,6 +97,9 @@ async function boot(): Promise<void> {
         // Rides the substrate's own window, so it is constructed with it and after it.
         airborne = new Airborne(scene, settings, biome, terrain.field, substrate, air);
         terrain.setAirborne(airborne);
+        // They reference each other on purpose: the air reads the ground's loose mass,
+        // the ground reads the air's debt, and each sees the other's previous step.
+        substrate.setAirborne(airborne);
         character = new PlaceholderCharacter(scene, settings, sky, shadows);
         shadows.setCasters(terrain.mesh, [character.mesh]);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
@@ -293,7 +296,7 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, rig, air, substrate, terrain };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, rig, air, substrate, airborne, terrain };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();

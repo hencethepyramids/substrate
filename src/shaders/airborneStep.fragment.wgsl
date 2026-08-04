@@ -41,6 +41,11 @@ const AB_HOLD_MAX: f32 = 0.85;
 /// Ceiling on suspended load, metres equivalent. Whiteout, not a singularity.
 const AB_MAX_DENSITY: f32 = 4.0;
 
+/// Distance over which flow divergence is measured, in metres. Large enough to be above
+/// the bilinear heightfield's derivative discontinuities and below the scale the wind
+/// actually varies on.
+const SB_DIV_H: f32 = 1.0;
+
 /// Last frame's buffer at a fractional texel of THIS frame's window.
 ///
 /// Bilinear, because advection lands between texels by definition — unlike the
@@ -78,6 +83,33 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // would — the CFL limit stops being a limit.
     let backTexel = (vec2f(c) + 0.5) - air.velocity.xz * (dt / texelMetres);
     var density = abPrevAt(backTexel).r;
+
+    // AND CARRY THE JACOBIAN, or the advection invents material.
+    //
+    // Plain semi-Lagrangian treats the field as intensive: the value follows the parcel
+    // unchanged. Density is not intensive. Where the flow DIVERGES the backward map
+    // contracts, so many target cells trace into one small source region and all read
+    // the same value — the total grows out of nothing. Measured at +50% over ten seconds
+    // by scripts/checkConserve.mjs, and this wind diverges wherever it accelerates over
+    // a windward face, which is everywhere that matters.
+    //
+    // The backward map is x - v(x)dt, whose Jacobian determinant is 1 - div(v)dt to
+    // first order. Multiplying by it is what makes a parcel thin out as it spreads and
+    // concentrate as it piles up, which is the behaviour that was missing.
+    // MEASURED OVER A METRE, NOT OVER A TEXEL. The terrain derivative comes from a
+    // bilinear field, so it is only C0 — it jumps at every heightfield cell boundary.
+    // Differencing the velocity across one 6 cm substrate texel therefore measures that
+    // jump rather than the flow, and feeding that noise back as a multiplicative factor
+    // compounds: it made the leak five times worse before it was measured. Divergence is
+    // a property of the wind, and the wind varies over tens of metres.
+    let dx = vec2f(SB_DIV_H, 0.0);
+    let dz = vec2f(0.0, SB_DIV_H);
+    let ax = sbAirAt(worldXZ + dx, sbSampleField(worldXZ + dx).yz);
+    let az = sbAirAt(worldXZ + dz, sbSampleField(worldXZ + dz).yz);
+    let bx = sbAirAt(worldXZ - dx, sbSampleField(worldXZ - dx).yz);
+    let bz = sbAirAt(worldXZ - dz, sbSampleField(worldXZ - dz).yz);
+    let div = ((ax.velocity.x - bx.velocity.x) + (az.velocity.z - bz.velocity.z)) / (2.0 * SB_DIV_H);
+    density = density * clamp(1.0 - div * dt, 0.85, 1.15);
 
     // LIFT. Only the loose material above the element's threshold is available, and only
     // where the flow still has shear to give. This is the one place windSusceptibility

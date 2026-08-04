@@ -337,6 +337,18 @@ export class Substrate {
         return this._fieldOrigin;
     }
 
+    /**
+     * Hand the relaxation the airborne buffer, so it can pay what the air owes the
+     * ground. Called from main once both exist — they reference each other by design:
+     * the air reads the ground's loose mass, the ground reads the air's debt, and each
+     * sees the other's PREVIOUS step, which is what keeps the coupling explicit.
+     */
+    setAirborne(airborne: { bindExchangeTo(target: SubstrateTarget): void }): void {
+        this._airborne = airborne;
+    }
+
+    private _airborne: { bindExchangeTo(target: SubstrateTarget): void } | null = null;
+
     /** Push the window uniforms every consumer shares. Once per frame, per material. */
     pushTo(material: SubstrateTarget): void {
         material.setVector2("sbSubOrigin", this._origin);
@@ -407,6 +419,7 @@ export class Substrate {
         target.setFloat("sbFieldSize", this._field.size);
         target.setFloat("sbHeightScale", this._settings.v["terrain.heightScale"]);
         pushSubstrateParams(target, this._element);
+        this._airborne?.bindExchangeTo(target);
     }
 
     private _pushFrame(target: ProceduralTexture): void {
