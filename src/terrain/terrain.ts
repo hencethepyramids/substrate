@@ -25,7 +25,7 @@ import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
  * The terrain system: one baked field, one static clipmap mesh, one draw call.
  */
 
-const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
+const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "tDisplace", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
 
 const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", "fSubsurfaceTint", "fGrain", "fPool", "fSmoke", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS, ...AIR_UNIFORMS];
 
@@ -231,6 +231,13 @@ export class Terrain {
         m.setFloat("tCells", CLIPMAP.cells);
         m.setFloat("tMorph", s["terrain.morph"] ? 1 : 0);
         m.setFloat("tLevels", CLIPMAP.levels);
+        m.setFloat("tDisplace", s["sys.displacement"] ? 1 : 0);
+        // The clipmap solve reads the buffer now, and this pass is shared with the shadow
+        // cast — so whichever material is being fed, it needs the substrate bound.
+        if (this._substrate !== null) {
+            this._substrate.bindTo(m);
+            this._substrate.pushTo(m);
+        }
 
         m.setVector2("sbFieldOrigin", this._fieldOrigin);
         m.setFloat("sbFieldExtent", this.field.extent);

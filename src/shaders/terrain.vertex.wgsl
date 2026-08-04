@@ -18,6 +18,7 @@ varying vWorld: vec3f;
 varying vDeriv: vec2f;
 varying vLevel: f32;
 varying vMorph: f32;
+varying vReliefTaken: f32;
 
 @vertex
 fn main(input: VertexInputs) -> FragmentInputs {
@@ -27,6 +28,7 @@ fn main(input: VertexInputs) -> FragmentInputs {
     vertexOutputs.vDeriv = v.deriv;
     vertexOutputs.vLevel = v.level;
     vertexOutputs.vMorph = v.morph;
+    vertexOutputs.vReliefTaken = v.reliefTaken;
 
     var clip = uniforms.viewProjection * vec4f(v.world, 1.0);
 

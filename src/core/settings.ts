@@ -104,6 +104,7 @@ export const SCHEMA = {
     "sys.lightPool": bool({ group: "Systems", label: "Dynamic light pool", def: true }),
     "sys.character": bool({ group: "Systems", label: "Character", def: true }),
     "sys.cloth": bool({ group: "Systems", label: "Cloth solver", def: true }),
+    "sys.displacement": bool({ group: "Systems", label: "Displace terrain by substrate", def: true, hint: "Off leaves the clipmap on the bare heightfield and the buffer as a normal map, which is what Phases 3 to 7 shipped." }),
     "sys.wake": bool({ group: "Systems", label: "Swept wake", def: true }),
     "sys.spray": bool({ group: "Systems", label: "Spray + particles", def: true }),
     "sys.post": bool({ group: "Systems", label: "Post chain", def: true }),

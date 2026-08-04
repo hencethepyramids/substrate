@@ -77,7 +77,7 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 7 complete
+## Status: Phase 8 in progress
 
 | Phase | State |
 | --- | --- |
@@ -89,7 +89,7 @@ between "builds" and "the driver will accept this".
 | 5 — air | **done** |
 | 6 — fire | **done** |
 | 7 — character | **done** |
-| 8 — traversal and wakes | not started |
+| 8 — traversal and wakes | **pass A landed** |
 | 9 — post | not started |
 | 10 — interactions | not started |
 | 11 — game layer | not started |
@@ -903,6 +903,63 @@ periods — breath, and weight drifting between the feet — faded in by the sam
 settle already uses, so it is absent the moment anyone walks and needs no second state.
 
 5 draw calls, up from 4.
+
+### Phase 8, traversal and wakes
+
+#### Pass A, the ground becomes geometry — landed
+
+**The substrate stops being a normal map.** Phase 3 wrote down that displacing the buffer
+was a Phase 8 job — a 24 cm print is three clipmap vertices at best, and displacing it
+naively would alias badly and pop across the CDLOD morph. This is that job.
+
+The displacement happens inside [clipmap.wgsl](src/shaders/lib/clipmap.wgsl), which means
+**the shadow cascades come along for free and must** — a shadow cast by the undisplaced
+surface is the shadow of a footprint that is not there.
+
+- **A vertex only represents what its own cell can hold.** At level 0 the spacing is 8.5 cm
+  against a 6.25 cm buffer texel, so a bootprint is genuinely geometry; by level 3 a cell
+  is 68 cm and a print inside it is a sub-cell wiggle that would shimmer every time the
+  clipmap snapped. Displacement fades out across that range and the surface shader picks
+  up the remainder as a normal, which is what it did for Phases 3 to 7.
+- **The filter width is the MORPHED spacing.** A vertex at the outer edge of its level has
+  slid onto one of its parent's, and the parent filters at twice the width — so anything
+  but `spacing * (1 + morph)` leaves the two disagreeing about how deep the ground is at
+  exactly the place they are meant to be the same vertex. That is a crack along every ring
+  boundary.
+- **Four taps at the quadrant centres**, not the cell corners: a box filter over exactly
+  the ground the vertex stands for. Corner taps would be shared with the neighbouring
+  vertex and would filter nothing.
+- **The surface shader subtracts what the geometry already took.** The vertex reports the
+  fraction it displaced, and the fragment adds only the remainder — otherwise a print is
+  shaded twice and reads far deeper than the one you can walk into.
+
+`sys.displacement` toggles it, and the A/B is the point:
+[phase8-normalmap-trench.png](shots/phase8-normalmap-trench.png) is a flat shading band;
+[phase8-displaced-trench.png](shots/phase8-displaced-trench.png) is a hollow with a
+shadowed interior and a lit far rim. All six of `checkGait`'s claims still pass unchanged,
+which is what says the CPU mirror the character walks on and the geometry the GPU draws
+still agree.
+
+**This cost a whole session to land, and almost all of it was spent being wrong.** Worth
+recording, because none of it was the maths:
+
+- The first version displaced the vertex and **left its derivative on the bare
+  heightfield**, so there was a real hollow in the mesh shaded as though the ground were
+  flat. That looks exactly like nothing happening. The normal has to move with the vertex —
+  and the same four taps already carry the gradient, being the analytic derivative of the
+  interpolation the depression came from.
+- `tDisplace` went into the shadow cast's uniform list and not the terrain material's, so
+  it silently stayed 0 — **and toggling it still changed the picture**, because the cast
+  was displacing while the shaded surface was not. A convincing wrong answer, and exactly
+  the disagreement `substrateClipmap` exists to make impossible.
+- Several probe rounds were run against a **dev server serving a stale `?raw` import**, so
+  two different shaders rendered identically and I concluded things about uniforms that
+  were not true. Shader iteration now goes through `npm run build` + `vite preview`, where
+  there is no question which shader is running.
+
+The lesson worth keeping: three of those are failures of the *measurement*, not the code,
+which is now the fourth time this project has had that happen. A probe is a thing that can
+lie, and a probe that renders identically twice is lying.
 
 ### Controls
 

@@ -27,6 +27,7 @@ varying vWorld: vec3f;
 varying vDeriv: vec2f;
 varying vLevel: f32;
 varying vMorph: f32;
+varying vReliefTaken: f32;
 
 uniform fCameraPos: vec3f;
 uniform fAlbedo: vec3f;
@@ -115,7 +116,13 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // the whole of Phase 4 pass A: the geometry is untouched — a 24 cm print is three
     // clipmap vertices at best — but the surface it describes is not, and light does not
     // care which of the two it was told about.
-    let relief = uniforms.fSurface.x * sbReliefFade(dist);
+    // MINUS WHAT THE GEOMETRY ALREADY HAS. Phase 8 displaces the clipmap by the same
+    // depression this slope describes, so near the camera a print is a real hollow in the
+    // mesh — and bending the normal by the full gradient on top of that shades it twice,
+    // which reads as a print far deeper than the one you can walk into. The vertex reports
+    // the fraction it took and this adds the remainder; the handoff is continuous because
+    // that fraction is.
+    let relief = uniforms.fSurface.x * sbReliefFade(dist) * (1.0 - input.vReliefTaken);
     let deriv = input.vDeriv - sub.slope * relief;
     let n = normalize(vec3f(-deriv.x, 1.0, -deriv.y));
 

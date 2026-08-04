@@ -57,3 +57,12 @@ Pass E hung a cloth on the back, driven by the air field.
 - `phase7-cloak-desert.png` — desert, sun 15, wind 0.62, walking. The same cloth in a
   real wind: swept across the body and lifted, on the velocity field that carved the
   dunes behind it.
+
+## Phase 8
+
+- `phase8-normalmap-trench.png` / `phase8-displaced-trench.png` — snow, sun 10, the same
+  0.7 m trench with `sys.displacement` off and on. The first is a flat shading band; the
+  second is a hollow with a shadowed interior and a lit far rim. That difference is the
+  whole of pass A.
+- `phase8-displaced-desert.png` — desert, sun 14, walking. Footprints as real geometry,
+  each one a depression the light finds rather than a normal pretending to be one.

@@ -116,8 +116,12 @@ export class Shadows {
                 // The clipmap uniforms come from substrateClipmap, the field ones from
                 // substrateTerrainField. Same names the beauty pass uses, because it is
                 // the same include.
-                uniforms: ["shViewProj", "shTile", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"],
-                samplers: ["sbFieldTex"],
+                // The substrate ones too, because substrateClipmap displaces by the buffer
+                // now. An include that declares a texture obliges every pass including it
+                // to BIND that texture — and this pass shares the clipmap solve precisely
+                // so it cannot disagree with the beauty pass about where a vertex is.
+                uniforms: ["shViewProj", "shTile", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "tDisplace", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale", "sbSubOrigin", "sbSubExtent", "sbSubSize", "sbSubFade"],
+                samplers: ["sbFieldTex", "sbSubTex"],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
         );
