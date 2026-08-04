@@ -4,6 +4,17 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <title>SUBSTRATE</title>
+        <!--
+            Inline, because this project ships zero assets and a favicon is no reason to
+            break that. Without it every load requests /favicon.ico and every console
+            opens on a 404 — which is exactly the sort of harmless noise that trains you
+            to stop reading the console, and this project finds its bugs in the console.
+            Three strata and a hollow carved out of the top one.
+        -->
+        <link
+            rel="icon"
+            href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2305070b'/%3E%3Cpath d='M0 20h32v12H0z' fill='%233a2f27'/%3E%3Cpath d='M0 14h32v6H0z' fill='%236b5a49'/%3E%3Cpath d='M0 9h13l3 4 3-4h13v5H0z' fill='%23d9cbb8'/%3E%3C/svg%3E"
+        />
         <style>
             :root {
                 color-scheme: dark;

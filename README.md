@@ -57,7 +57,7 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 4 complete
+## Status: Phase 5 complete
 
 | Phase | State |
 | --- | --- |
@@ -66,7 +66,7 @@ between "builds" and "the driver will accept this".
 | 2 — sky, lighting, atmosphere | done |
 | 3 — substrate buffer | **done** |
 | 4 — surface materials | **done** |
-| 5 — air | **pass A landed, B next** |
+| 5 — air | **done** |
 | 6 — fire | not started |
 | 7 — character | not started |
 | 8 — traversal and wakes | not started |
@@ -487,10 +487,31 @@ Three things happen, and they are the whole of aeolian transport:
 substrate stays the only thing that writes the substrate — and B1 has no feedback loop at
 all, which is what keeps a working Phase 3 out of the blast radius.
 
-#### Pass B2, closing the loop — next
+#### Pass B2, closing the loop — landed
 
-The relaxation pass reads that exchange channel and applies it. Then the ground loses
-mass on a windward face and gains it on a slip face, and a dune migrates.
+The relaxation pass reads that exchange channel and applies it, shifted by the same
+whole-texel window scroll `srPrevAt` uses — that buffer was written in *last* frame's
+window, and reading it unshifted would drag every deposit backwards across the ground at
+walking pace. The air reads the ground's loose mass, the ground reads the air's debt, and
+each sees the other's previous step.
+
+**The exchange is exact. The system is not conserved, and it is worth being precise about
+which.** Lift and settle move the same amount the other way, so they cannot invent or
+destroy anything between them. But material blows out through the window's open boundary,
+and the advection is semi-Lagrangian on a divergent 2D field standing in for a vertical
+flux it does not represent. [scripts/checkConserve.mjs](scripts/checkConserve.mjs)
+measures it and asserts **one-sidedly**: loss is a tuning matter, but a world that breeds
+sand is a runaway.
+
+It did breed sand, at +50% per ten seconds, until it was measured. Plain semi-Lagrangian
+treats density as *intensive* — the value rides the parcel unchanged — and density is
+not. Where the flow diverges the backward trace contracts, many target cells trace into
+one small source region, and every one of them reads the same value. Carrying the
+Jacobian of that trace, `1 - div(v)·dt`, is what stops it. Two things cost a round each
+and are recorded in the code: measuring that divergence across one 6 cm texel measures
+the bilinear heightfield's C0 derivative jumps rather than the flow (and made it five
+times worse), and measuring conservation over ten seconds measures the open boundary
+rather than conservation, because a parcel crosses the window in about two.
 
 ### Controls
 
@@ -555,6 +576,26 @@ flush.
 because Babylon swaps the counter object out whenever timing is toggled — a cached
 reference silently reports a stale value forever. Later phases register their passes
 with one line: `gpu.register("substrate", () => substrateRT.gpuTimeInFrame)`.
+
+### Known, and why they are still here
+
+Two warnings survive a clean boot. Both are named here rather than left as mystery noise,
+because a console you have learned to skim is a console that will hide the next real bug.
+
+- **`powerPreference is currently ignored on Windows`** — Chrome's, not ours.
+  [crbug.com/369219127](https://crbug.com/369219127). It picks the right adapter anyway:
+  the capture harness reports `nvidia / lovelace`.
+- **`Destroyed texture [D3DImageBacking_...WebGPUSwapBufferProvider] used in a submit`**,
+  once, on frame 1 or 2. It names the **swap-chain** texture, not anything this project
+  allocates, and everything renders correctly from frame 3 onward. It has been present
+  since Phase 2, survives with every one of our own systems disabled, and is a Babylon /
+  Dawn interaction around the first swap-chain acquisition. Left alone deliberately: it
+  costs one line at boot and chasing it means reading Babylon's WebGPU backend rather
+  than building the thing.
+
+Neither has ever masked a real failure — every runtime bug this project has had announced
+itself either as a compile error naming a shader, a boot probe reporting a large number,
+or a picture that was obviously wrong.
 
 ### Deliberately deferred
 
