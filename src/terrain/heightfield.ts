@@ -72,6 +72,24 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 /** Texels across the probe. */
 const PROBE_WIDTH = 64;
 
+/**
+ * How far the baked field may sit from the function before it means something.
+ *
+ * SOME DISAGREEMENT IS IRREDUCIBLE, and the old 0.05 m did not know that. The field is
+ * bilinear over 0.5 m texels and `sbRidgedD` is built on `abs()`, so a ridge line is a
+ * genuine C0 crease that no amount of care at this resolution can represent. Measured:
+ * volcanic reports 0.080 m, and dropping `ridgeAmp` to zero takes it to 0.033 m — over
+ * half of it is the creases, exactly as the maths says it must be. The old limit was
+ * therefore crying wolf on correct terrain every boot, which is how a console stops
+ * being read.
+ *
+ * The failure this probe exists to catch is a MIRRORED field, and that scores 5–9 m —
+ * the "other orientation" figure printed alongside. 0.5 m still catches it by a factor
+ * of ten while leaving honest sampling error alone, and the measured number is logged
+ * unconditionally so a regression is visible whether or not it trips the warning.
+ */
+const BAKE_ERROR_LIMIT = 0.5;
+
 export class Heightfield {
     readonly size = FIELD_SIZE;
     readonly extent = FIELD_EXTENT;
@@ -365,7 +383,7 @@ export class Heightfield {
         const best = Math.min(scores[0], scores[1]);
         const worst = Math.max(scores[0], scores[1]);
         console.info(`[substrate] heightfield bake orientation: ${this._bakeFlipV === 0 ? "as written" : "FLIPPED to match the target"} (error ${best.toFixed(4)} m, other orientation ${worst.toFixed(2)} m)`);
-        if (best > 0.05) {
+        if (best > BAKE_ERROR_LIMIT) {
             console.warn(`[substrate] baked field still disagrees with sbTerrainD by ${best.toFixed(3)} m — anything that evaluates the function directly will not match the clipmap`);
         }
     }
