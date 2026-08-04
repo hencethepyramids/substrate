@@ -289,6 +289,12 @@ async function boot(): Promise<void> {
 
     engine.runRenderLoop(frame);
 
+    // The live systems, for scripts/capture.mjs. Settings is the whole control surface,
+    // so a harness can drive any view or parameter at runtime instead of reloading the
+    // page per experiment — and the wind vector can be read rather than re-derived,
+    // which is the difference between checking a sign and asserting one.
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, rig, air, substrate, terrain };
+
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
         overlay.dispose();

@@ -24,6 +24,21 @@ capability gate prints a message and stops.
 | [CI](.github/workflows/ci.yml) | push to `main`, any PR | typecheck, shader check, build, upload `dist` as a 7-day artifact |
 | [Deploy](.github/workflows/deploy.yml) | push to `main` | builds with `VITE_BASE=/substrate/` and publishes to GitHub Pages |
 
+**And a third kind of check, which runs the real thing.**
+[scripts/capture.mjs](scripts/capture.mjs) drives headless Chromium against the dev
+server and brings back a screenshot and the boot console — on the **real adapter**, which
+it prints, and which on this machine is the actual card rather than a software fallback.
+Settings go in through `localStorage` before load, so it needs no hook into the app.
+Frames land in [shots/](shots/). It is not performance evidence: headless timings are not
+the timings you get with a compositor, so GPU pass numbers still come from a human.
+
+[scripts/checkWind.mjs](scripts/checkWind.mjs) goes further and *measures*. Some questions
+a picture cannot answer — the lee of one dune and the windward face of the next are the
+same pixels — so it reads the wind vector the app is actually using and the drawn surface
+through its own CPU mirror, and reports the slope distribution. That is where
+`air.separation` got its number, and it is also how the terrain turned out to be far
+gentler than the registry's own comments claim.
+
 Typecheck and build are separate steps on purpose — a type error and a bundling
 error should be two distinct red steps, not one ambiguous failure.
 
