@@ -233,18 +233,38 @@ export class Gait {
             const t = cyc - k;
             this._phase[i] = t;
 
-            const neutralX = this._px + this._cos * half * side;
-            const neutralZ = this._pz - this._sin * half * side;
+            // A FOOT PLANTS AHEAD OF THE BODY, NOT UNDER IT.
+            //
+            // This is the single thing that made the walk look wrong, and it is geometry
+            // rather than taste. A foot is down for `duty` of its cycle and a cycle is two
+            // strides of ground, so while it is planted the body travels `duty * 2 *
+            // stride` past it. Landing it underneath means it ends stance that entire
+            // distance behind the hip — 0.93 m against a leg of 0.86 — so the leg is
+            // straight for the whole back half of every step and the IK clamps: the foot
+            // is drawn somewhere the leg physically cannot reach, and the shin stops
+            // short of it. Measured at 97% mean extension with peaks of 111%, and 40% of
+            // frames pinned at full stretch.
+            //
+            // Landing it `duty * stride` ahead makes the excursion symmetric — the same
+            // distance in front at touchdown as behind at toe-off — which halves the reach
+            // the leg is asked for and lets the knee bend through the whole of stance. It
+            // is also the geometry the pelvis bob was derived for.
+            const lead = duty * stride;
+            const plantX = this._px + travelX * lead + this._cos * half * side;
+            const plantZ = this._pz + travelZ * lead - this._sin * half * side;
+            // Where the foot belongs when the character is simply standing: underneath.
+            const standX = this._px + this._cos * half * side;
+            const standZ = this._pz - this._sin * half * side;
 
             if (k !== this._cycle[i]) {
                 // One plant however many cycles were skipped. A hitch drops prints; it
                 // does not pay them back as a burst all landing in one footstep.
                 this._cycle[i] = k;
-                this._setPlant(i, neutralX, neutralZ);
+                this._setPlant(i, plantX, plantZ);
                 if (this.plantCount < MAX_PLANTS && moving) {
                     const p = this.plants[this.plantCount++];
-                    p.x = neutralX;
-                    p.z = neutralZ;
+                    p.x = plantX;
+                    p.z = plantZ;
                     // A run presses harder than a walk, capped: sprinting is 2.4x walking
                     // and a print two and a half times as deep reads as a crater.
                     p.load = 1 + Math.min(speedRatio, 3) * 0.4;
@@ -282,8 +302,8 @@ export class Gait {
                 // every frame, so a turn mid-swing steers the foot rather than leaving
                 // it committed to a landing the character is no longer walking towards.
                 const remaining = (1 - t) * 2 * stride;
-                const tx = this._px + travelX * remaining + this._cos * half * side;
-                const tz = this._pz + travelZ * remaining - this._sin * half * side;
+                const tx = this._px + travelX * (remaining + lead) + this._cos * half * side;
+                const tz = this._pz + travelZ * (remaining + lead) - this._sin * half * side;
                 const ease = u * u * (3 - 2 * u);
                 ax = px + (tx - px) * ease;
                 az = pz + (tz - pz) * ease;
@@ -307,10 +327,10 @@ export class Gait {
             // is also what stopping actually looks like: you finish the step you were
             // taking, you do not slide the one you were standing on.
             if (this._stand > 0.001 && t >= duty) {
-                const ny = this.groundAt(neutralX, neutralZ) + P.ankle;
-                ax += (neutralX - ax) * this._stand;
+                const ny = this.groundAt(standX, standZ) + P.ankle;
+                ax += (standX - ax) * this._stand;
                 ay += (ny - ay) * this._stand;
-                az += (neutralZ - az) * this._stand;
+                az += (standZ - az) * this._stand;
             }
 
             this._ankle[i * 3] = ax;
@@ -354,7 +374,15 @@ export class Gait {
         // changing the stride slider changes the walk rather than breaking it.
         const halfStride = Math.min(stride * 0.5, LEG * 0.95);
         const drop = LEG - Math.sqrt(Math.max(LEG * LEG - halfStride * halfStride, 0));
-        const standY = P.ankle + LEG * 0.97;
+        // YOU STAND TALL AND YOU WALK WITH BENT KNEES.
+        //
+        // A single standing height was the other half of the locked-leg problem. The reach
+        // cap below is a LIMIT, and if the pose sits at the limit then the leg is straight
+        // by construction — which is what it did, at 97% extension through the whole cycle.
+        // Real walking carries the hip at about 0.88 of leg length rather than 0.97, and
+        // that difference is the entire knee bend. Standing gets the tall pose back, and
+        // the crossfade is the same `moving` the rest of the gait already uses.
+        const standY = P.ankle + LEG * (0.97 - 0.09 * moving);
         const bob = drop * 0.5 * (1 + Math.cos(2 * Math.PI * stepPhase)) * moving;
 
         // Weight shifts onto whichever foot is in mid-stance: the right at half-integer
@@ -528,10 +556,18 @@ export class Gait {
         const kneeY = hy + thighY * THIGH;
         const kneeZ = thighZ * THIGH;
 
+        // THE ANKLE THE LEG CAN ACTUALLY REACH, which is the clamped one. Pointing the
+        // shin at a target beyond the leg's length and then drawing the foot AT that
+        // target leaves the two disconnected — a foot floating off the end of a shin that
+        // stops short of it. Whatever the gait wanted, the leg is as long as it is.
+        const reachX = hx + tx;
+        const reachY = hy + ty;
+        const reachZ = tz;
+
         sk.setHead(thigh, hx, hy, 0);
         sk.setDir(thigh, thighX, thighY, thighZ);
         sk.setHead(shin, kneeX, kneeY, kneeZ);
-        sk.setDir(shin, ax - kneeX, ay - kneeY, az - kneeZ);
+        sk.setDir(shin, reachX - kneeX, reachY - kneeY, reachZ - kneeZ);
 
         // The foot rolls: flat through early stance, up off the toe at the end of it,
         // toe raised through the swing so it clears the ground it is crossing.
@@ -562,7 +598,7 @@ export class Gait {
         const rz = sk.restDir[fi + 2];
         const cp = Math.cos(pitch);
         const sp = Math.sin(pitch);
-        sk.setHead(foot, ax, ay, az);
+        sk.setHead(foot, reachX, reachY, reachZ);
         sk.setDir(foot, sk.restDir[fi], ry * cp - rz * sp, ry * sp + rz * cp);
     }
 

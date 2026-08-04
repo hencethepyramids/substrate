@@ -96,6 +96,14 @@ await page.evaluate(() => {
         // footR is bone 7, footL bone 10 — the ankle is each foot bone's head.
         const r = at(7);
         const l = at(10);
+        // Hips are the thigh heads: bone 5 right, bone 8 left. How far a leg is extended
+        // is the thing that decides whether a gait reads as walking or as stilts, and it
+        // is invisible in a still because a fully straight leg is a perfectly ordinary
+        // pose for one frame.
+        const hipR = at(5);
+        const hipL = at(8);
+        const legR = Math.hypot(r[0] - hipR[0], r[1] - hipR[1], r[2] - hipR[2]);
+        const legL = Math.hypot(l[0] - hipL[0], l[1] - hipL[1], l[2] - hipL[2]);
         window.__gaitLog.push({
             t: performance.now(),
             r,
@@ -121,6 +129,8 @@ await page.evaluate(() => {
             pr: app.gait.phaseOf(0),
             pl: app.gait.phaseOf(1),
             duty: app.gait.duty,
+            legR,
+            legL,
             facing: app.mover.facing,
             stand: app.gait.standing,
             // Cloth stretch EVERY FRAME, not once at the end. A solver that is losing it
@@ -445,6 +455,24 @@ const printOk2 = deepestPrint > 0.015;
 const clothOk = stretchP99 < 0.08;
 
 console.log("");
+{
+    // LEG is 0.86 m in skeleton.ts. Anything at 100% is the IK clamping, which means the
+    // foot is drawn somewhere the leg cannot actually reach.
+    const LEG = 0.86;
+    const ext = [];
+    for (const f of log) {
+        if (f.speed < 0.5) continue;
+        for (const k of ["legR", "legL"]) ext.push(f[k] / LEG);
+    }
+    ext.sort((a, b) => a - b);
+    const eq = (q) => ext[Math.min(ext.length - 1, Math.floor(q * ext.length))] ?? 0;
+    const st = log.filter((f) => f.speed > 0.5).map((f) => f.stand).sort((a,b)=>a-b);
+  console.log(`  stand blend while walking       p50 ${(st[Math.floor(st.length/2)] ?? -1).toFixed(3)}, max ${(st[st.length-1] ?? -1).toFixed(3)}  (0 = fully walking)`);
+  const hips = log.filter((f) => f.speed > 0.5).map((f) => (f.r[1] + f.l[1]) / 2);
+  const clamped = ext.filter((v) => v > 0.985).length / Math.max(ext.length, 1);
+    console.log(`  leg extension p50/p90/max       ${(eq(0.5) * 100).toFixed(0)}% / ${(eq(0.9) * 100).toFixed(0)}% / ${(eq(1) * 100).toFixed(0)}% of leg length`);
+    console.log(`  at full stretch (IK clamping)   ${(clamped * 100).toFixed(1)}% of walking frames`);
+}
 console.log(`  cloth edge stretch              p50 ${(stretches[Math.floor(stretches.length / 2)] * 100).toFixed(1)}%, p99 ${(stretchP99 * 100).toFixed(1)}%, peak ${(stretches[stretches.length - 1] * 100).toFixed(1)}%`);
 console.log(`  cloth hanging                   ${cloth.hang.toFixed(3)} m of ${cloth.ideal.toFixed(3)} m`);
 console.log(`planted foot holds     ${slideOk ? "PASS" : "FAIL"}`);

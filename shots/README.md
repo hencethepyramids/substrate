@@ -66,3 +66,8 @@ Pass E hung a cloth on the back, driven by the air field.
   whole of pass A.
 - `phase8-displaced-desert.png` — desert, sun 14, walking. Footprints as real geometry,
   each one a depression the light finds rather than a normal pretending to be one.
+
+- `phase7-run-fixed.png` — snow, sun 26, sprinting. After the locked-leg fix: the trailing
+  knee is bent, the feet are attached to the legs, and the prints behind are the Phase 8
+  displaced geometry. Before this the legs were straight at 97% extension throughout and
+  peaked at 111% — past full reach, where the IK clamps and the foot leaves the shin.
