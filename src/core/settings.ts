@@ -169,6 +169,13 @@ export const SCHEMA = {
     "air.gustScale": num({ group: "Air", label: "Gust scale", def: 0.02, min: 0.002, max: 0.2, step: 0.002, unit: "1/m", advanced: true }),
     "air.gustAmount": num({ group: "Air", label: "Gust amount", def: 0.35, min: 0, max: 1, step: 0.01, advanced: true, hint: "Gusts advect downwind rather than pulsing in place." }),
 
+    // -- Fire ----------------------------------------------------------------
+    // Heat, and the phase change it drives. What each element DOES with heat lives in
+    // elements/registry.ts; these are the ignition source and nothing else.
+    "fire.igniteRadius": num({ group: "Fire", label: "Ignite radius", def: 1.6, min: 0.2, max: 12, step: 0.1, unit: "m" }),
+    "fire.igniteRate": num({ group: "Fire", label: "Ignite rate", def: 3, min: 0.1, max: 20, step: 0.1, unit: "/s", hint: "Heat poured in per second while igniting. Normalised: 1 is as hot as this world gets." }),
+    "fire.igniteFrames": num({ group: "Fire", label: "Ignite duration", def: 30, min: 1, max: 300, step: 1, unit: "frames", advanced: true, hint: "An ignition is a press, not a permanent flame. What happens afterwards is the element's business." }),
+
     // -- Surface -------------------------------------------------------------
     // The look controls Phase 4 owns. Everything that differs BETWEEN elements is in
     // elements/registry.ts; these scale all of them at once.

@@ -19,6 +19,7 @@ import { Substrate } from "./substrate/substrate";
 import { Carve } from "./substrate/carve";
 import { AirField } from "./air/airField";
 import { Airborne } from "./air/airborne";
+import { Fire } from "./fire/fire";
 import { PlaceholderCharacter } from "./character/placeholder";
 import { registerShaderIncludes } from "./shaders/lib/register";
 import { Overlay } from "./ui/overlay";
@@ -60,6 +61,7 @@ async function boot(): Promise<void> {
     let terrain!: Terrain;
     let substrate!: Substrate;
     let airborne!: Airborne;
+    let fire!: Fire;
     let character!: PlaceholderCharacter;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
@@ -100,6 +102,11 @@ async function boot(): Promise<void> {
         // They reference each other on purpose: the air reads the ground's loose mass,
         // the ground reads the air's debt, and each sees the other's previous step.
         substrate.setAirborne(airborne);
+        // Heat rides the same window again. The ground reads its phase; it never writes
+        // the ground.
+        fire = new Fire(scene, settings, biome, substrate);
+        terrain.setFire(fire);
+        substrate.setFire(fire);
         character = new PlaceholderCharacter(scene, settings, sky, shadows);
         shadows.setCasters(terrain.mesh, [character.mesh]);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
@@ -124,6 +131,7 @@ async function boot(): Promise<void> {
     loader.add("substrate buffer", 2, async (report) => {
         await substrate.prepare(report);
         await airborne.prepare();
+        await fire.prepare();
     });
 
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
@@ -144,6 +152,7 @@ async function boot(): Promise<void> {
             sky.update(rig.camera);
             substrate.update(rig.camera, 1 / 60);
             airborne.update(1 / 60);
+            fire.update(1 / 60);
             terrain.update(rig.camera);
             character.update(rig.camera);
             shadows.update(rig.camera);
@@ -177,7 +186,8 @@ async function boot(): Promise<void> {
         gpu.register("shadow cascades", () => shadows.gpuTime);
         gpu.register("substrate", () => substrate.gpuTime);
         gpu.register("airborne", () => airborne.gpuTime);
-        registerActions(overlay, settings, mover, rig, terrain, substrate, carve);
+        gpu.register("heat", () => fire.gpuTime);
+        registerActions(overlay, settings, mover, rig, terrain, substrate, carve, fire);
     });
 
     try {
@@ -262,6 +272,9 @@ async function boot(): Promise<void> {
         // After the ground: it reads the mass the substrate has just finished writing,
         // on that pass's own window.
         airborne.update(simDt);
+        // Heat last: it reads nothing the others write this frame, and the ground picks
+        // its phase up next frame.
+        fire.update(simDt);
         perf.end(S_SUBSTRATE);
 
         perf.begin(S_UNIFORMS);
@@ -296,11 +309,12 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, rig, air, substrate, airborne, terrain };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, rig, air, substrate, airborne, fire, terrain };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
         overlay.dispose();
+        fire.dispose();
         airborne.dispose();
         substrate.dispose();
         terrain.dispose();
@@ -315,7 +329,7 @@ async function boot(): Promise<void> {
 }
 
 /** Overlay buttons. Phase 10's element interactions register here too. */
-function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, terrain: Terrain, substrate: Substrate, carve: Carve): void {
+function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, terrain: Terrain, substrate: Substrate, carve: Carve, fire: Fire): void {
     const teleport = (x: number, z: number): void => {
         mover.teleport(x, z);
         mover.position.y = terrain.field.sampleHeight(x, z);
@@ -342,6 +356,12 @@ function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig
         substrate.stamp(mover.position.x, mover.position.z, settings.v["substrate.carveRadius"], settings.v["substrate.testDepth"]);
     });
     overlay.addAction("clear substrate", () => substrate.reset());
+    // Phase 6's acceptance test as one click. The same heat into three elements: snow
+    // melts and stops, sand barely registers it, rock goes molten and stays that way.
+    overlay.addAction("ignite", () => {
+        fire.ignite(mover.position.x, mover.position.z, settings.v["fire.igniteRadius"], settings.v["fire.igniteRate"]);
+    });
+    overlay.addAction("cool down", () => fire.reset());
 }
 
 boot().catch((err) => {

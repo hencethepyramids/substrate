@@ -24,6 +24,12 @@ var srPrev: texture_2d<f32>;
 var srAirborneSampler: sampler;
 var srAirborne: texture_2d<f32>;
 
+/// Last frame's heat buffer. Only its G channel is read: phase. The heat pass owns that
+/// value; this mirrors it into the A channel so everything already reading the ground
+/// through substrateBuffer sees it without a second binding.
+var srFireSampler: sampler;
+var srFire: texture_2d<f32>;
+
 /// Texels across the window.
 uniform srSize: f32;
 /// Metres per texel.
@@ -107,6 +113,14 @@ fn srOwedAt(c: vec2i) -> f32 {
     let inside = all(p >= vec2i(0, 0)) && all(p <= vec2i(m, m));
     let v = textureLoad(srAirborne, clamp(p, vec2i(0, 0), vec2i(m, m)), 0).g;
     return select(0.0, v, inside);
+}
+
+/// Phase at this texel, from last frame's heat step. Shifted exactly as srPrevAt is.
+fn srPhaseAt(c: vec2i) -> f32 {
+    let p = c + vec2i(round(uniforms.srShift));
+    let m = i32(uniforms.srSize) - 1;
+    let inside = all(p >= vec2i(0, 0)) && all(p <= vec2i(m, m));
+    return select(0.0, textureLoad(srFire, clamp(p, vec2i(0, 0), vec2i(m, m)), 0).g, inside);
 }
 
 fn srWorldOf(c: vec2i) -> vec2f {
@@ -279,6 +293,12 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     s.x = s.x * decay;
     s.y = s.y * decay;
     s.z = s.z * exp2(-dt / (half * SR_PACK_PERSIST));
+
+    // Mirror phase across from the heat pass, at the very end, so everything above ran on
+    // ONE consistent frame of it — the centre texel and its eight neighbours all carrying
+    // the same vintage. A quantity that already lags by the element's own phaseLag can
+    // afford another frame; a stencil disagreeing with itself cannot.
+    s.w = srPhaseAt(c);
 
     var outColor = vec4f(clamp(s.x, -SR_MAX_OFFSET, SR_MAX_OFFSET), clamp(s.y, 0.0, SR_MAX_OFFSET), clamp(s.z, 0.0, 1.0), clamp(s.w, 0.0, 1.0));
 

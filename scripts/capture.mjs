@@ -134,6 +134,15 @@ if (carves > 0) {
     }, carves);
 }
 
+// Optionally set fire to the ground first, for Phase 6's questions.
+if (argv.has("ignite")) {
+    await page.evaluate((rate) => {
+        const app = window.__substrate;
+        if (rate > 0) app.settings.set("fire.igniteRate", rate);
+        app.fire.ignite(app.mover.position.x, app.mover.position.z, app.settings.get("fire.igniteRadius"), app.settings.get("fire.igniteRate"));
+    }, Number(argv.get("ignite")) || 0);
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 

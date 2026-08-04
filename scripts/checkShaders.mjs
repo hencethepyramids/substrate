@@ -98,6 +98,20 @@ function resolve(raw, where, seen = new Set()) {
 const declaredUniforms = new Set();
 const declaredTextures = new Set();
 
+/**
+ * WGSL's reserved word list, trimmed to the ones a person would plausibly reach for as a
+ * variable name. The full list runs to hundreds and most of them (`reinterpret_cast`,
+ * `pixelfragment`) nobody is going to type by accident; these are the traps.
+ *
+ * `input` and `output` are deliberately NOT here despite reading like keywords: sixteen
+ * shipping shaders in this project name their entry-point parameter `input`, which is
+ * Babylon's own convention, and every one of them compiles. A checker that cries wolf
+ * about working code gets switched off.
+ */
+const WGSL_RESERVED = new Set([
+    "target", "sample", "filter", "binding", "buffer", "texture", "shared", "common", "handle", "resource", "select", "typedef", "template", "union", "using", "where", "with", "match", "mat", "vec", "get", "set", "new", "null", "nullptr", "namespace", "package", "premerge", "regardless", "require", "restrict", "self", "signed", "sizeof", "smooth", "snorm", "static", "std", "subroutine", "super", "unless", "unorm", "virtual", "yield", "asm", "auto", "become", "cast", "class", "compile", "do", "enum", "explicit", "export", "extern", "final", "friend", "goto", "inline", "macro", "module", "operator", "private", "protected", "public", "pub", "ref", "typename", "unsafe", "unsized", "wgsl",
+]);
+
 function checkEntry(path) {
     const where = relative(root, path);
     check(where, readFileSync(path, "utf8"));
@@ -154,6 +168,24 @@ function check(where, raw) {
         if (!declaredFns.has(m[1])) err(where, `${m[1]}(...) is called but no "fn ${m[1]}" is declared here or in its includes — the #include that defines it is missing`);
     }
 
+    // WGSL reserved keywords used as identifiers
+    //
+    // WGSL reserves a long list of words it does not currently use, against future
+    // grammar. They read as perfectly ordinary variable names -- `target`, `sample`,
+    // `filter`, `binding` -- and nothing but the driver objects. `let target = ...` in
+    // the Phase 6 heat pass compiled clean through tsc, vite and every other check here,
+    // and failed with "'target' is a reserved keyword" the first time a GPU saw it.
+    for (const m of src.matchAll(/\b(?:let|var|const)\s+(\w+)\s*[:=]/g)) {
+        if (WGSL_RESERVED.has(m[1])) err(where, `"${m[1]}" is a reserved keyword in WGSL and cannot be an identifier — the driver rejects the whole shader`);
+    }
+    for (const m of src.matchAll(/^\s*fn\s+(\w+)\s*\(([^)]*)\)/gm)) {
+        if (WGSL_RESERVED.has(m[1])) err(where, `"${m[1]}" is a reserved keyword in WGSL and cannot name a function`);
+        for (const p of m[2].split(",")) {
+            const name = p.trim().split(":")[0].trim();
+            if (name && WGSL_RESERVED.has(name)) err(where, `"${name}" is a reserved keyword in WGSL and cannot name a parameter`);
+        }
+    }
+
     // bare return in an entry point
     for (const m of src.matchAll(/@(fragment|vertex)\s+fn\s+(\w+)[\s\S]*?\n\}/g)) {
         if (/\breturn\s*;/.test(m[0])) {
@@ -161,8 +193,63 @@ function check(where, raw) {
         }
     }
 
+    // textures pulled in by an include the entry point never actually uses
+    checkReachableTextures(where, src, textures);
+
     // declaration order
     checkOrder(where, src);
+}
+
+/**
+ * A texture this shader must BIND but can never READ.
+ *
+ * An include that declares a texture obliges every shader including it to bind that
+ * texture — the oldest gotcha in this project, written up in the README since Phase 2.
+ * Include a header for one helper you want and you silently inherit a binding
+ * requirement for a texture you will never touch, and the failure arrives as a wall of
+ * Babylon bind-group errors at boot rather than as anything pointing at the include.
+ *
+ * So: walk the call graph out from the entry point, and any declared texture that no
+ * reachable function mentions is an include that should not be there.
+ */
+function checkReachableTextures(where, src, textures) {
+    if (textures.size === 0) return;
+
+    // Function bodies, approximately: from each `fn name(` to the next one. Everything in
+    // this project is a top-level function, so that is exact enough.
+    const bodies = new Map();
+    const decls = [...src.matchAll(/^\s*fn\s+(\w+)\s*\(/gm)];
+    for (let i = 0; i < decls.length; i++) {
+        const start = decls[i].index;
+        const end = i + 1 < decls.length ? decls[i + 1].index : src.length;
+        bodies.set(decls[i][1], src.slice(start, end));
+    }
+
+    const entry = [...src.matchAll(/@(?:fragment|vertex|compute)[\s\S]*?fn\s+(\w+)\s*\(/g)].map((m) => m[1]);
+    if (entry.length === 0) return;
+
+    const reachable = new Set();
+    const queue = [...entry];
+    while (queue.length > 0) {
+        const name = queue.pop();
+        if (reachable.has(name)) continue;
+        reachable.add(name);
+        const body = bodies.get(name);
+        if (body === undefined) continue;
+        for (const m of body.matchAll(/\b(\w+)\s*\(/g)) {
+            if (bodies.has(m[1]) && !reachable.has(m[1])) queue.push(m[1]);
+        }
+    }
+
+    // The entry point's own body counts too, and it is already in `reachable`.
+    let text = "";
+    for (const name of reachable) text += bodies.get(name) ?? "";
+
+    for (const t of textures) {
+        if (!new RegExp(`\\b${t}\\b`).test(text)) {
+            err(where, `texture ${t} is declared but nothing this entry point can reach ever reads it — an #include is pulling in a binding requirement for a texture this pass will never touch`);
+        }
+    }
 }
 
 /**

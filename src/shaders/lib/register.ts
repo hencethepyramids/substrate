@@ -18,6 +18,8 @@ import brdf from "./brdf.wgsl?raw";
 import tonemap from "./tonemap.wgsl?raw";
 import air from "./air.wgsl?raw";
 import airborne from "./airborne.wgsl?raw";
+import fireParams from "./fireParams.wgsl?raw";
+import fireBuffer from "./fireBuffer.wgsl?raw";
 
 /**
  * Registers the shared WGSL includes.
@@ -63,4 +65,8 @@ export function registerShaderIncludes(): void {
     // Declares no texture either: the wind is a function of the terrain, not a buffer.
     store["substrateAir"] = air;
     store["substrateAirborne"] = airborne;
+    // Same split again: the numbers travel without the texture, so the relaxation pass
+    // can read the element's heat block without binding a buffer it does not want.
+    store["substrateFireParams"] = fireParams;
+    store["substrateFireBuffer"] = fireBuffer;
 }

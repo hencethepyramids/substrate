@@ -57,6 +57,16 @@ const SNOW: ElementDef = {
         thermalCoupling: 1.0,
         liftThreshold: 0.06,
     },
+    fire: {
+        // Melts at the slightest provocation, and then stops. Ice's latent heat is the
+        // largest of any common material: a snowfield under a blowtorch holds at melting
+        // point for a long time rather than disappearing, and that plateau is this number.
+        ignition: 0.12,
+        conductivity: 0.3,
+        cooling: 0.55,
+        latent: 0.8,
+        phaseLag: 0.4,
+    },
     atmosphere: {
         groundAlbedo: [0.85, 0.88, 0.93],
         groundBounce: 1.0,
@@ -126,6 +136,15 @@ const DESERT: ElementDef = {
         windSusceptibility: 0.85,
         thermalCoupling: 0.15,
         liftThreshold: 0.015,
+    },
+    fire: {
+        // Sand does very little until it does a great deal. High ignition, and dry
+        // grains are a poor conductor, so heat stays where it was put.
+        ignition: 0.78,
+        conductivity: 0.16,
+        cooling: 0.38,
+        latent: 0.25,
+        phaseLag: 1.2,
     },
     atmosphere: {
         groundAlbedo: [0.55, 0.42, 0.27],
@@ -197,6 +216,16 @@ const VOLCANIC: ElementDef = {
         // High: this is what freezes lava crust in place as phase state cools.
         thermalCoupling: 0.9,
         liftThreshold: 0.006,
+    },
+    fire: {
+        // Goes molten readily, conducts well, and holds its heat. The long phase lag IS
+        // the crust: the surface sets while the rock underneath is still hot, which is
+        // what lets a flow carry a solid skin on top of moving lava.
+        ignition: 0.22,
+        conductivity: 0.55,
+        cooling: 0.1,
+        latent: 0.35,
+        phaseLag: 6.0,
     },
     atmosphere: {
         groundAlbedo: [0.06, 0.055, 0.05],

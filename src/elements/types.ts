@@ -34,6 +34,36 @@ export interface SubstrateParams {
 }
 
 /**
+ * Consumed by the single heat pass (Phase 6).
+ *
+ * "Fire" here is not combustion — it is HEAT DRIVING A PHASE CHANGE, which is the only
+ * reading that unifies the three elements instead of privileging one. Snow melts, sand
+ * needs far more before it does anything, and rock goes molten and then sets into crust.
+ * Same pass, same five numbers, and the phase channel it produces already has two
+ * consumers waiting for it from earlier phases: `thermalCoupling` softens cohesion so
+ * molten material flows, and `emissiveGain` makes it glow.
+ */
+export interface FireParams {
+    /** Heat at which the material starts changing phase. Normalised, 0..1. */
+    ignition: number;
+    /** How fast heat spreads through the material, in m2/s. Rock conducts; snow does not. */
+    conductivity: number;
+    /** Fraction of its heat the surface loses to the air per second. */
+    cooling: number;
+    /**
+     * Heat the phase change swallows before phase can advance further. This is what
+     * gives melting a plateau rather than a ramp — ice absorbs an enormous amount at
+     * constant temperature, which is exactly why a snowfield does not vanish at once.
+     */
+    latent: number;
+    /**
+     * Seconds for phase to catch up with heat. Lava crust lags badly and that lag IS
+     * the crust: the rock is still hot underneath long after the surface has set.
+     */
+    phaseLag: number;
+}
+
+/**
  * Consumed by the analytic sky + IBL bake (Phase 2). The ground bounce term is what
  * differentiates the biomes at the lighting level, so it is a first-class parameter.
  */
@@ -138,6 +168,7 @@ export interface ElementDef {
     blurb: string;
     terrain: TerrainDef;
     substrate: SubstrateParams;
+    fire: FireParams;
     atmosphere: AtmosphereParams;
     surface: SurfaceParams;
     wake: WakeParams;

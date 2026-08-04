@@ -49,7 +49,11 @@ does look: it resolves the `#include` graph and fails on an unregistered include
 `uniforms.x` with no declaration behind it, a uniform or texture the WGSL declares
 that no TypeScript ever sets (and the reverse), a texture missing its paired sampler,
 a call to a project function nothing declares — which is what a missing `#include` looks
-like, and it survives a green build with nothing to show for it —
+like, and it survives a green build with nothing to show for it — a texture declared but
+unreachable from the entry point, which is what an *unnecessary* `#include` looks like and
+which silently obliges the pass to bind something it will never read — a WGSL **reserved
+keyword** used as an identifier (`let target = ...` parses fine to every tool but the
+driver) —
 an identifier used above its declaration, and a bare `return;` inside an entry point —
 which Babylon's processor turns into invalid WGSL by appending its own `return`. It
 does not compile WGSL and cannot tell you the picture is right. It closes the gap
@@ -512,6 +516,39 @@ and are recorded in the code: measuring that divergence across one 6 cm texel me
 the bilinear heightfield's C0 derivative jumps rather than the flow (and made it five
 times worse), and measuring conservation over ten seconds measures the open boundary
 rather than conservation, because a parcel crosses the window in about two.
+
+### Phase 6, fire
+
+> Not combustion. Heat driving a phase change.
+
+Combustion privileges one element and leaves the other two with nothing to do. Heat does
+not: snow melts, sand needs a great deal before it does anything, and rock goes molten and
+then sets. Same pass, same five numbers in `FireParams`, no branch on biome.
+
+#### Pass A, heat and the phase change — landed
+
+- **Phase 6 only had to WRITE the channel.** `phase` has been the substrate's fourth
+  channel since Phase 3 and zero ever since, with two consumers already wired and waiting:
+  `thermalCoupling` softens cohesion so molten material flows, and `emissiveGain` makes it
+  glow. Writing it lit both at once, with no change to either — see
+  [shots/phase6-lava-volcanic.png](shots/phase6-lava-volcanic.png).
+- **Heat does not advect.** It is *in* the material and the material is not going
+  anywhere, which is the whole difference between this pass and the airborne one — and
+  why it needs no Jacobian and carries no open-boundary caveat.
+- **Latent heat is a plateau, not a ramp.** The phase ramp is `latent` wide, so a material
+  with a large one sits part-way through the transition across a broad band of heat rather
+  than flipping. Snow's 0.8 is the largest in the registry and it is why a snowfield holds
+  at melting point instead of vanishing the moment it is warmed.
+- **The phase lag IS the crust.** Volcanic's six seconds against snow's four tenths is
+  the difference between a flow that carries a solid skin while the rock beneath it is
+  still molten, and a puddle that does not. Compare `heat` against `fuel` in the debug
+  views: the gap between them is latent heat plus that lag.
+- **It never writes the ground.** The relaxation pass mirrors phase across into the A
+  channel, at the very end of its step, so the whole stencil ran on one consistent frame
+  of it. The ground stays the only thing that writes the ground — the same rule the
+  airborne exchange follows.
+
+**Verified on an RTX Lovelace card.** `ignite` is the acceptance test as one click.
 
 ### Controls
 

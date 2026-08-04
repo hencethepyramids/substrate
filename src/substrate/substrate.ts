@@ -337,6 +337,18 @@ export class Substrate {
         return this._fieldOrigin;
     }
 
+    /** World XZ of the window's minimum corner. Phase 6's heat rides the same square. */
+    get origin(): Vector2 {
+        return this._origin;
+    }
+
+    /** Hand the relaxation the heat buffer, so it can mirror phase into the A channel. */
+    setFire(fire: { bindPhaseTo(target: SubstrateTarget): void }): void {
+        this._fire = fire;
+    }
+
+    private _fire: { bindPhaseTo(target: SubstrateTarget): void } | null = null;
+
     /**
      * Hand the relaxation the airborne buffer, so it can pay what the air owes the
      * ground. Called from main once both exist — they reference each other by design:
@@ -420,6 +432,7 @@ export class Substrate {
         target.setFloat("sbHeightScale", this._settings.v["terrain.heightScale"]);
         pushSubstrateParams(target, this._element);
         this._airborne?.bindExchangeTo(target);
+        this._fire?.bindPhaseTo(target);
     }
 
     private _pushFrame(target: ProceduralTexture): void {

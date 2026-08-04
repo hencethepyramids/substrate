@@ -21,6 +21,7 @@
 // Below substrateNoise: the gusts ride on sbNoiseD.
 #include<substrateAir>
 #include<substrateAirborne>
+#include<substrateFireBuffer>
 
 varying vWorld: vec3f;
 varying vDeriv: vec2f;
@@ -62,6 +63,8 @@ const SB_DEBUG_SURF_SUBSURFACE: f32 = 16.0;
 const SB_DEBUG_SURF_GLINTS: f32 = 17.0;
 const SB_DEBUG_WIND: f32 = 18.0;
 const SB_DEBUG_AIRBORNE: f32 = 19.0;
+const SB_DEBUG_HEAT: f32 = 20.0;
+const SB_DEBUG_FUEL: f32 = 21.0;
 
 /// Full scale for the metric substrate channels, in metres. A 25 cm hollow saturates.
 const SB_SUB_FULL_SCALE: f32 = 0.25;
@@ -222,6 +225,17 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // crest — if it sits still, nothing is being advected.
         let load = sbAirborneAt(input.vWorld.xz);
         rgb = vec3f(0.04) + vec3f(0.85, 0.75, 0.55) * clamp(load.density * 6.0, 0.0, 1.0);
+    } else if (debug == SB_DEBUG_HEAT) {
+        // Heat as a blackbody walk, so it reads the way the emissive term will: dull red,
+        // orange, white. Ignite and watch it conduct outward and cool. Volcanic holds it
+        // for a very long time; snow sheds it almost at once.
+        let h = sbFireAt(input.vWorld.xz).heat;
+        rgb = vec3f(0.04) + vec3f(1.0, 0.08 + 0.35 * h, 0.02 + 0.25 * h * h) * clamp(h * 1.4, 0.0, 1.0);
+    } else if (debug == SB_DEBUG_FUEL) {
+        // Phase, which is what heat is FOR. Compare it against heat above: the gap
+        // between them is latent heat plus the element's phase lag, and in volcanic that
+        // gap is the crust — surface set, rock beneath still molten.
+        rgb = vec3f(0.04) + vec3f(0.35, 0.55, 1.0) * sbFireAt(input.vWorld.xz).phase;
     } else if (debug == SB_DEBUG_AERIAL) {
         // How much of this pixel is air. Should reach roughly 1 at the clipmap edge
         // — anywhere it does not, the terrain's own silhouette is visible against

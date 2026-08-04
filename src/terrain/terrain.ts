@@ -13,6 +13,7 @@ import { Shadows, SHADOW_UNIFORMS, SHADOW_SAMPLERS } from "../render/shadows";
 import { SUBSTRATE_UNIFORMS, SUBSTRATE_SAMPLERS, type Substrate } from "../substrate/substrate";
 import { AIR_UNIFORMS, type AirField } from "../air/airField";
 import { AIRBORNE_SAMPLERS, type Airborne } from "../air/airborne";
+import { FIRE_SAMPLERS, type Fire } from "../fire/fire";
 import { debugCode } from "../render/debugViews";
 import { Heightfield } from "./heightfield";
 import { buildClipmapMesh, CLIPMAP, type ClipmapStats } from "./clipmapMesh";
@@ -74,7 +75,7 @@ export class Terrain {
             {
                 attributes: ["position"],
                 uniforms: [...VERTEX_UNIFORMS, ...FRAGMENT_UNIFORMS],
-                samplers: ["sbFieldTex", ...SKY_SAMPLERS, ...SHADOW_SAMPLERS, ...SUBSTRATE_SAMPLERS, ...AIRBORNE_SAMPLERS],
+                samplers: ["sbFieldTex", ...SKY_SAMPLERS, ...SHADOW_SAMPLERS, ...SUBSTRATE_SAMPLERS, ...AIRBORNE_SAMPLERS, ...FIRE_SAMPLERS],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
         );
@@ -133,6 +134,14 @@ export class Terrain {
     }
 
     private _airborne: Airborne | null = null;
+
+    /** And the heat. Bound every frame — it ping-pongs like the others. */
+    setFire(fire: Fire): void {
+        this._fire = fire;
+        fire.bindTo(this.material);
+    }
+
+    private _fire: Fire | null = null;
 
     /** Compiles the pipeline and bakes the field. Runs behind the loading screen. */
     async prepare(report?: (fraction: number) => void): Promise<void> {
@@ -197,6 +206,7 @@ export class Terrain {
         m.setVector4("fGrain", this._grain);
         this._air?.pushTo(m);
         this._airborne?.bindTo(m);
+        this._fire?.bindTo(m);
     }
 
     dispose(): void {
