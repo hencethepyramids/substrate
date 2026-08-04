@@ -104,17 +104,10 @@ fn main(input: VertexInputs) -> FragmentInputs {
     // first fraction of its life puts the brightness where the ember actually is.
     let fade = smoothstep(0.0, EM_FADE_IN, t) * (1.0 - t);
     // SIZE DOES NOT FOLLOW THE FADE. Tying it to brightness made a spark shrink to
-    // nothing by the time it had climbed clear of the pool that launched it — so the only
-    // moments it was large were the moments it was lost inside the glare. It dims as it
-    // rises; it does not evaporate.
-    // SIZE DOES NOT FOLLOW THE FADE. Tying it to brightness made a spark shrink to
     // nothing by the time it had climbed clear of the pool that launched it, so the only
     // moments it was large were the moments it was lost inside the glare. It dims as it
     // rises; it does not evaporate.
     let size = uniforms.emParams.w * (0.4 + 0.6 * rnd.z) * alive * (0.55 + 0.45 * (1.0 - t));
-    // Not multiplied by heat. An ember carries its own fire away from the ground that
-    // launched it — dimming it by the heat where it was BORN made every spark brightest
-    // in the one place it could not be seen, which is inside the glare of the pool.
     // Not multiplied by heat. An ember carries its own fire away from the ground that
     // launched it, and dimming it by the heat where it was BORN would make every spark
     // faintest exactly where it can finally be seen against the sky.
