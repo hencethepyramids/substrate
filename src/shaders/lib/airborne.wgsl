@@ -21,6 +21,9 @@ struct SbAirborne {
     /// Written here rather than applied directly, so the ground stays the only thing
     /// that edits the ground.
     exchange: f32,
+    /// Smoke over this cell, same units. Rides the same wind and the same advection as
+    /// the material beside it, because it IS material — just hot enough to leave.
+    smoke: f32,
 };
 
 fn sbAirborneTexel(c: vec2i) -> vec4f {
@@ -45,5 +48,28 @@ fn sbAirborneAt(worldXZ: vec2f) -> SbAirborne {
     var a: SbAirborne;
     a.density = v.r;
     a.exchange = v.g;
+    a.smoke = v.b;
     return a;
+}
+
+/// How much smoke sits between the eye and a point, as an optical depth.
+///
+/// The buffer is a column density on a flat grid, so there is no height to march
+/// through — what there is instead is the ground track of the view ray, and how much
+/// smoke sits along it. Marching that track is what makes a plume actually OBSCURE the
+/// ground behind it rather than merely tinting the cell it is standing on.
+///
+/// Samples are spaced along the ray's XZ projection, so a glancing view through a plume
+/// accumulates far more than a view straight down onto it — which is the behaviour that
+/// makes smoke read as a volume rather than as a decal.
+fn sbSmokeDepth(cameraXZ: vec2f, worldXZ: vec2f, taps: i32) -> f32 {
+    let step = (worldXZ - cameraXZ) / f32(taps);
+    let len = length(step);
+    var acc = 0.0;
+    for (var i = 0; i < taps; i++) {
+        // Offset by half a step so the march samples cell centres rather than its own
+        // endpoints, which would double-count the pixel and miss the camera.
+        acc += sbAirborneAt(cameraXZ + step * (f32(i) + 0.5)).smoke;
+    }
+    return acc * len;
 }

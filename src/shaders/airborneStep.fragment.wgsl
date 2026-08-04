@@ -20,6 +20,10 @@
 #include<substrateAir>
 #include<substrateParams>
 #include<substrateBuffer>
+// Smoke is airborne material that happens to be hot, so it lives in this buffer's spare
+// channel rather than a fourth one — and gets the wind, the advection and the Jacobian
+// correction for free, already written and already measured.
+#include<substrateFireBuffer>
 
 varying vUV: vec2f;
 
@@ -28,6 +32,9 @@ var abPrev: texture_2d<f32>;
 
 /// x: timestep, y: reset, z: lift rate, w: settle rate.
 uniform abStep: vec4f;
+/// x: smoke made per second per unit heat, y: how fast it thins, z: heat below which
+/// nothing smokes.
+uniform abSmoke: vec3f;
 /// Whole-texel scroll from this frame's window to last frame's, exactly as the substrate
 /// computes it: old = new + shift.
 uniform abShift: vec2f;
@@ -109,7 +116,12 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let bx = sbAirAt(worldXZ - dx, sbSampleField(worldXZ - dx).yz);
     let bz = sbAirAt(worldXZ - dz, sbSampleField(worldXZ - dz).yz);
     let div = ((ax.velocity.x - bx.velocity.x) + (az.velocity.z - bz.velocity.z)) / (2.0 * SB_DIV_H);
-    density = density * clamp(1.0 - div * dt, 0.85, 1.15);
+    let jacobian = clamp(1.0 - div * dt, 0.85, 1.15);
+    density = density * jacobian;
+
+    // Smoke rides the very same trace and the very same correction. It is the reason it
+    // lives in this buffer rather than in one of its own.
+    var smoke = abPrevAt(backTexel).b * jacobian;
 
     // LIFT. Only the loose material above the element's threshold is available, and only
     // where the flow still has shear to give. This is the one place windSusceptibility
@@ -136,10 +148,21 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 
     density = clamp(density + lift - settle, 0.0, AB_MAX_DENSITY);
 
+    // SMOKE. Hot ground makes it, the wind takes it, and it thins as it goes.
+    //
+    // There is no buoyancy term and there cannot be one: this is a column density on a
+    // flat grid, so "rising" has nowhere to rise to. What thinning stands in for is a
+    // plume climbing out of the layer this buffer represents and spreading as it does —
+    // which is also why it fades rather than settling. Material comes back down; smoke
+    // does not.
+    let hot = max(sbFireTexel(c).r - uniforms.abSmoke.z, 0.0);
+    smoke = smoke + hot * uniforms.abSmoke.x * dt;
+    smoke = clamp(smoke * exp(-uniforms.abSmoke.y * dt), 0.0, AB_MAX_DENSITY);
+
     // What the ground is owed. Positive is material coming back down.
     let exchange = settle - lift;
 
-    var outColor = vec4f(density, exchange, 0.0, 0.0);
+    var outColor = vec4f(density, exchange, smoke, 0.0);
     outColor = select(outColor, vec4f(0.0), uniforms.abStep.y > 0.5);
 
     // Single exit point — Babylon appends its own return.

@@ -1,7 +1,7 @@
 import { ProceduralTexture } from "@babylonjs/core/Materials/Textures/Procedurals/proceduralTexture";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import { Constants } from "@babylonjs/core/Engines/constants";
-import { Vector4 } from "@babylonjs/core/Maths/math.vector";
+import { Vector3, Vector4 } from "@babylonjs/core/Maths/math.vector";
 import type { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import type { Scene } from "@babylonjs/core/scene";
 import type { WebGPUPerfCounter } from "@babylonjs/core/Engines/WebGPU/webgpuPerfCounter";
@@ -56,6 +56,7 @@ export class Airborne {
     private _cleared = false;
 
     private readonly _step = new Vector4(0, 0, 0, 0);
+    private readonly _smoke = new Vector3(0, 0, 0);
 
     constructor(scene: Scene, settings: Settings, biome: BiomeState, field: Heightfield, substrate: Substrate, air: AirField) {
         this._scene = scene;
@@ -123,6 +124,16 @@ export class Airborne {
         this._step.set(step, 0, s["airborne.liftRate"], s["airborne.settleRate"]);
         this._render();
     }
+
+    /**
+     * Hand this pass the heat buffer, so smoke has something to be made by. Set from
+     * main once both exist; the heat pass does not know this one is watching it.
+     */
+    setFire(fire: { bindTo(target: never): void }): void {
+        this._fire = fire as unknown as { bindTo(target: ProceduralTexture): void };
+    }
+
+    private _fire: { bindTo(target: ProceduralTexture): void } | null = null;
 
     /** Point a material's airborne sampler at the current front buffer. Every frame. */
     bindTo(material: ShaderMaterial): void {
@@ -194,6 +205,12 @@ export class Airborne {
         pushSubstrateParams(target, this._element);
         target.setVector4("abStep", this._step);
         target.setFloat("abThreshold", this._settings.v["airborne.threshold"]);
+        const s = this._settings.v;
+        this._smoke.set(s["sys.smoke"] ? s["smoke.rate"] : 0, s["smoke.thinning"], s["smoke.threshold"]);
+        target.setVector3("abSmoke", this._smoke);
+        // Smoke is made by heat, so this pass needs to see it. Bound here rather than
+        // owned, exactly as the substrate is.
+        this._fire?.bindTo(target);
     }
 
     private _clear(): void {

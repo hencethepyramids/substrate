@@ -592,9 +592,34 @@ Left alone it lit the plates almost as brightly as the cracks and washed the who
 of having crust straight back out. It is now scaled by the crust's mean transmission, so
 the pool and the surface casting it stay consistent as the `fire.crust` dial moves.
 
-#### Pass D, smoke and embers — next
+#### Pass D, smoke — landed
 
-`sys.smoke` and `sys.embers` are still reserved with nothing behind them.
+**Smoke did not need a buffer of its own.** It is airborne material that happens to be
+hot, so it lives in the spare channel of the Phase 5 airborne buffer — and gets the wind,
+the semi-Lagrangian advection and the Jacobian correction for free, all of it already
+written and already measured. A fourth ping-pong pair would have been a second copy of
+work that was done.
+
+- **Hot ground makes it, the wind takes it, and it thins as it goes.** There is no
+  buoyancy term and there cannot be one: this is a column density on a flat grid, so
+  "rising" has nowhere to rise to. Thinning stands in for a plume climbing out of the
+  layer the buffer represents — which is also why smoke fades rather than settling.
+  Material comes back down; smoke does not.
+- **It is marched, not looked up.** Sampling at the shaded pixel would make smoke a decal.
+  Marching the ground track between the eye and the pixel is what makes a plume *obscure*
+  what is behind it, and why a glancing view through one accumulates far more than a view
+  straight down onto it.
+- **It is lit by the sky it sits under**, through the same `sbHazeColor` the aerial
+  perspective uses, so it is grey at noon and orange at dusk with no colour of its own to
+  keep in sync.
+- **Thinning sets the plume's length as much as its density.** Lifetime × wind speed is
+  how far it reaches: at 0.28/s it outran the entire 64 m window and read as global fog
+  rather than as a plume. 0.6/s is about 21 m at a fresh breeze.
+
+#### Pass E, embers — next
+
+`sys.embers` is still reserved with nothing behind it, and it is the first thing in this
+phase that wants geometry rather than a field.
 
 ### Controls
 

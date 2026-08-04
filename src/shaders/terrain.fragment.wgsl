@@ -40,6 +40,14 @@ uniform fSubsurfaceTint: vec3f;
 uniform fGrain: vec4f;
 /// x: light-pool strength, y: its radius in metres, z: how much crust covers the glow.
 uniform fPool: vec3f;
+/// x: smoke opacity. Zero switches the march off entirely.
+uniform fSmoke: vec2f;
+
+/// Steps along the ground track. Few, because the field is already smooth — conduction
+/// and advection have both diffused it before anything looks at it.
+const SB_SMOKE_TAPS: i32 = 6;
+/// Smoke is grey, not black: it scatters most of what hits it.
+const SB_SMOKE_ALBEDO: f32 = 0.7;
 
 /// Packed material is smoother than the loose material it was made from, so a print in
 /// snow catches a highlight the powder around it does not. One more thing the compaction
@@ -291,6 +299,18 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // Aerial perspective. Extinction over the path, in-scatter the colour the air
         // in that direction actually is.
         color = color * transmittance + sbHazeColor(viewDir) * (vec3f(1.0) - transmittance);
+
+        // Smoke, marched along the ground track between the eye and this pixel. Doing it
+        // as a march rather than a lookup at the pixel is what makes a plume OBSCURE the
+        // ground behind it: a glancing view through one accumulates far more than a view
+        // straight down onto it, which is the whole difference between a volume and a
+        // decal. Lit by the sky it sits under, so it is grey at noon and orange at dusk
+        // without a colour of its own to tune.
+        if (uniforms.fSmoke.x > 0.0) {
+            let depth = sbSmokeDepth(uniforms.fCameraPos.xz, input.vWorld.xz, SB_SMOKE_TAPS) * uniforms.fSmoke.x;
+            let through = exp(-depth);
+            color = color * through + sbHazeColor(viewDir) * SB_SMOKE_ALBEDO * (1.0 - through);
+        }
 
         // AgX by default. Phase 4's specular is physically correct and therefore
         // enormous — a glitter path at a low sun runs about twenty times over white —

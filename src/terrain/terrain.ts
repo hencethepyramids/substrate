@@ -27,7 +27,7 @@ import terrainFragment from "../shaders/terrain.fragment.wgsl?raw";
 
 const VERTEX_UNIFORMS = ["viewProjection", "tCenter", "tInnerSpacing", "tCells", "tMorph", "tLevels", "sbFieldOrigin", "sbFieldExtent", "sbFieldSize", "sbHeightScale"];
 
-const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", "fSubsurfaceTint", "fGrain", "fPool", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS, ...AIR_UNIFORMS];
+const FRAGMENT_UNIFORMS = ["fCameraPos", "fAlbedo", "fAlbedoCompacted", "fAlbedoSteep", "fParams", "fSurface", "fSubsurfaceTint", "fGrain", "fPool", "fSmoke", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS, ...SUBSTRATE_UNIFORMS, ...AIR_UNIFORMS];
 
 export class Terrain {
     readonly field: Heightfield;
@@ -47,6 +47,7 @@ export class Terrain {
     private readonly _surface = new Vector4(0, 0, 0, 0);
     private readonly _grain = new Vector4(0, 0, 0, 0);
     private readonly _pool = new Vector3(0, 0, 0);
+    private readonly _smoke = new Vector2(0, 0);
     private readonly _albedo = new Color3(1, 1, 1);
     private readonly _albedoCompacted = new Color3(1, 1, 1);
     private readonly _albedoSteep = new Color3(0.5, 0.5, 0.5);
@@ -207,6 +208,8 @@ export class Terrain {
         m.setVector4("fGrain", this._grain);
         this._pool.set(s["sys.lightPool"] ? s["fire.lightPool"] : 0, s["fire.lightRadius"], s["fire.crust"]);
         m.setVector3("fPool", this._pool);
+        this._smoke.set(s["sys.smoke"] ? s["smoke.density"] : 0, 0);
+        m.setVector2("fSmoke", this._smoke);
         this._air?.pushTo(m);
         this._airborne?.bindTo(m);
         this._fire?.bindTo(m);

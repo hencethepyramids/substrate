@@ -97,16 +97,18 @@ async function boot(): Promise<void> {
         terrain.setSubstrate(substrate);
         terrain.setAir(air);
         // Rides the substrate's own window, so it is constructed with it and after it.
+        // Heat rides the same window again. The ground reads its phase; it never writes
+        // the ground. Built before the air, because smoke is made by heat.
+        fire = new Fire(scene, settings, biome, substrate);
+        terrain.setFire(fire);
+        substrate.setFire(fire);
+
         airborne = new Airborne(scene, settings, biome, terrain.field, substrate, air);
+        airborne.setFire(fire);
         terrain.setAirborne(airborne);
         // They reference each other on purpose: the air reads the ground's loose mass,
         // the ground reads the air's debt, and each sees the other's previous step.
         substrate.setAirborne(airborne);
-        // Heat rides the same window again. The ground reads its phase; it never writes
-        // the ground.
-        fire = new Fire(scene, settings, biome, substrate);
-        terrain.setFire(fire);
-        substrate.setFire(fire);
         character = new PlaceholderCharacter(scene, settings, sky, shadows);
         shadows.setCasters(terrain.mesh, [character.mesh]);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
@@ -130,8 +132,8 @@ async function boot(): Promise<void> {
     // probe that checks where a carve lands should run against the real field.
     loader.add("substrate buffer", 2, async (report) => {
         await substrate.prepare(report);
-        await airborne.prepare();
         await fire.prepare();
+        await airborne.prepare();
     });
 
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
