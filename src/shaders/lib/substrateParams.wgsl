@@ -8,9 +8,10 @@
 // simulation level. There is no branch on biome below and there must never be one:
 // if an element cannot be expressed here, the shared system is wrong, not the element.
 //
-// Only the fields Phase 3 actually consumes are declared. windSusceptibility and
-// liftThreshold belong to the Phase 5 air coupling and are deliberately absent — a
-// uniform nothing reads still costs a slot in the UBO, and the shader check flags it.
+// The last two arrived with Phase 5 and are the element's coupling to the air. The
+// relaxation pass declares them without reading them, which the shader check will say
+// so about — that is the honest trade for keeping ONE parameter block rather than
+// splitting the element in half to dodge two warnings.
 
 uniform spCohesion: f32;
 uniform spReposeDeg: f32;
@@ -18,6 +19,10 @@ uniform spSlumpAnisotropy: f32;
 uniform spDiffusionRate: f32;
 uniform spDecayHalfLife: f32;
 uniform spThermalCoupling: f32;
+/// How strongly this material couples to the air field. 0..1
+uniform spWindSusceptibility: f32;
+/// Loose depth above which material starts leaving the ground, in metres.
+uniform spLiftThreshold: f32;
 
 const SP_DEG2RAD: f32 = 0.017453292;
 

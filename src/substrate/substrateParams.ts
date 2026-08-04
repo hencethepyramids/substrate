@@ -13,7 +13,7 @@ import type { ElementDef } from "../elements/types";
  * yet, and a uniform nothing reads still costs a UBO slot. Phase 5 adds them alongside
  * the code that reads them.
  */
-export const SUBSTRATE_PARAM_UNIFORMS = ["spCohesion", "spReposeDeg", "spSlumpAnisotropy", "spDiffusionRate", "spDecayHalfLife", "spThermalCoupling"] as const;
+export const SUBSTRATE_PARAM_UNIFORMS = ["spCohesion", "spReposeDeg", "spSlumpAnisotropy", "spDiffusionRate", "spDecayHalfLife", "spThermalCoupling", "spWindSusceptibility", "spLiftThreshold"] as const;
 
 /** Anything with the setter shape — a ShaderMaterial or a ProceduralTexture. */
 export interface SubstrateParamTarget {
@@ -29,4 +29,6 @@ export function pushSubstrateParams(target: SubstrateParamTarget, element: Eleme
     target.setFloat("spDiffusionRate", p.diffusionRate);
     target.setFloat("spDecayHalfLife", p.decayHalfLife);
     target.setFloat("spThermalCoupling", p.thermalCoupling);
+    target.setFloat("spWindSusceptibility", p.windSusceptibility);
+    target.setFloat("spLiftThreshold", p.liftThreshold);
 }

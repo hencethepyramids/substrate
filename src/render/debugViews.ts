@@ -31,6 +31,7 @@ export const DEBUG_CODES: Record<string, number> = {
     "surface.subsurface": 16,
     "surface.glints": 17,
     wind: 18,
+    airborne: 19,
 };
 
 export function debugCode(view: string): number {

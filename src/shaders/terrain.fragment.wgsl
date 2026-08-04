@@ -20,6 +20,7 @@
 #include<substrateTonemap>
 // Below substrateNoise: the gusts ride on sbNoiseD.
 #include<substrateAir>
+#include<substrateAirborne>
 
 varying vWorld: vec3f;
 varying vDeriv: vec2f;
@@ -60,6 +61,7 @@ const SB_DEBUG_SURF_ROUGHNESS: f32 = 15.0;
 const SB_DEBUG_SURF_SUBSURFACE: f32 = 16.0;
 const SB_DEBUG_SURF_GLINTS: f32 = 17.0;
 const SB_DEBUG_WIND: f32 = 18.0;
+const SB_DEBUG_AIRBORNE: f32 = 19.0;
 
 /// Full scale for the metric substrate channels, in metres. A 25 cm hollow saturates.
 const SB_SUB_FULL_SCALE: f32 = 0.25;
@@ -214,6 +216,12 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         let air = sbAirAt(input.vWorld.xz, input.vDeriv);
         let flow = clamp(air.shear * 0.5, 0.0, 1.0);
         rgb = vec3f(0.04) + vec3f(0.25, 0.7, 1.0) * flow * (1.0 - air.separated) + vec3f(0.9, 0.15, 0.1) * air.separated;
+    } else if (debug == SB_DEBUG_AIRBORNE) {
+        // What is in the air over each cell. Carve a pit in the desert with a strong
+        // wind and this should stream off the rim and pool in the lee of the nearest
+        // crest — if it sits still, nothing is being advected.
+        let load = sbAirborneAt(input.vWorld.xz);
+        rgb = vec3f(0.04) + vec3f(0.85, 0.75, 0.55) * clamp(load.density * 6.0, 0.0, 1.0);
     } else if (debug == SB_DEBUG_AERIAL) {
         // How much of this pixel is air. Should reach roughly 1 at the clipmap edge
         // — anywhere it does not, the terrain's own silhouette is visible against

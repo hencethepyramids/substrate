@@ -434,12 +434,34 @@ raymarch. The asymmetry that drives dune migration is the shear differential bet
 stoss and lee, and that is captured; the reach of the wake is not, and pass B will say
 whether it has to be.
 
-#### Pass B, airborne material — next
+#### Pass B1, airborne material — landed
 
-Loose mass past `liftThreshold` leaves the ground, advects on this field, and settles
-back into the substrate buffer — with `windSusceptibility` deciding how strongly each
-element couples. Both numbers have been in `SubstrateParams` since Phase 0 waiting for
-it. That one *does* carry history, so it does get a buffer.
+This one *does* carry history, so it does get a buffer — ping-ponged **on the substrate's
+own window**: same origin, extent, texel grid and snapping, taken from it every frame
+rather than computed a second time. Material crosses between ground and air constantly,
+and on a shared grid that exchange is texel-to-texel with no resampling and no way for
+the two to disagree about where a cell is.
+
+Three things happen, and they are the whole of aeolian transport:
+
+- **Lift** — loose material past `liftThreshold`, where the shear is high enough, leaves
+  the ground at a rate set by `windSusceptibility`. Those two numbers have been sitting
+  in `SubstrateParams` since Phase 0 waiting for this, and between them they are why ash
+  goes up in a breeze and packed snow does not.
+- **Ride** — semi-Lagrangian advection, so a gale cannot outrun the timestep the way
+  explicit advection would. The CFL limit stops being a limit.
+- **Settle** — suspension survives where the air is moving and drops out where it has
+  slowed or separated. That asymmetry is the entire reason material accumulates on a slip
+  face instead of being carried onward forever.
+
+**It does not edit the ground.** It records what it owes in an exchange channel, so the
+substrate stays the only thing that writes the substrate — and B1 has no feedback loop at
+all, which is what keeps a working Phase 3 out of the blast radius.
+
+#### Pass B2, closing the loop — next
+
+The relaxation pass reads that exchange channel and applies it. Then the ground loses
+mass on a windward face and gains it on a slip face, and a dune migrates.
 
 ### Controls
 

@@ -12,6 +12,7 @@ import { Sky, SKY_UNIFORMS, SKY_SAMPLERS, WORLD_GROUP } from "../render/sky";
 import { Shadows, SHADOW_UNIFORMS, SHADOW_SAMPLERS } from "../render/shadows";
 import { SUBSTRATE_UNIFORMS, SUBSTRATE_SAMPLERS, type Substrate } from "../substrate/substrate";
 import { AIR_UNIFORMS, type AirField } from "../air/airField";
+import { AIRBORNE_SAMPLERS, type Airborne } from "../air/airborne";
 import { debugCode } from "../render/debugViews";
 import { Heightfield } from "./heightfield";
 import { buildClipmapMesh, CLIPMAP, type ClipmapStats } from "./clipmapMesh";
@@ -73,7 +74,7 @@ export class Terrain {
             {
                 attributes: ["position"],
                 uniforms: [...VERTEX_UNIFORMS, ...FRAGMENT_UNIFORMS],
-                samplers: ["sbFieldTex", ...SKY_SAMPLERS, ...SHADOW_SAMPLERS, ...SUBSTRATE_SAMPLERS],
+                samplers: ["sbFieldTex", ...SKY_SAMPLERS, ...SHADOW_SAMPLERS, ...SUBSTRATE_SAMPLERS, ...AIRBORNE_SAMPLERS],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
         );
@@ -124,6 +125,14 @@ export class Terrain {
         this._air = air;
         air.pushTo(this.material);
     }
+
+    /** And the material the wind is carrying. Bound every frame — it ping-pongs. */
+    setAirborne(airborne: Airborne): void {
+        this._airborne = airborne;
+        airborne.bindTo(this.material);
+    }
+
+    private _airborne: Airborne | null = null;
 
     /** Compiles the pipeline and bakes the field. Runs behind the loading screen. */
     async prepare(report?: (fraction: number) => void): Promise<void> {
@@ -187,6 +196,7 @@ export class Terrain {
         this._grain.set(surf.glintDensity, surf.glintBasis, s["surface.glintStrength"], surf.emissiveGain);
         m.setVector4("fGrain", this._grain);
         this._air?.pushTo(m);
+        this._airborne?.bindTo(m);
     }
 
     dispose(): void {

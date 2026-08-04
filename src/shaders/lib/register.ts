@@ -17,6 +17,7 @@ import substrateBuffer from "./substrateBuffer.wgsl?raw";
 import brdf from "./brdf.wgsl?raw";
 import tonemap from "./tonemap.wgsl?raw";
 import air from "./air.wgsl?raw";
+import airborne from "./airborne.wgsl?raw";
 
 /**
  * Registers the shared WGSL includes.
@@ -61,4 +62,5 @@ export function registerShaderIncludes(): void {
     store["substrateTonemap"] = tonemap;
     // Declares no texture either: the wind is a function of the terrain, not a buffer.
     store["substrateAir"] = air;
+    store["substrateAirborne"] = airborne;
 }

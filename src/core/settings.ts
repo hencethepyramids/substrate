@@ -65,6 +65,7 @@ export const DEBUG_VIEWS = [
     "surface.subsurface",
     "surface.glints",
     "wind",
+    "airborne",
     "fuel",
     "heat",
     "overdraw",
@@ -162,6 +163,8 @@ export const SCHEMA = {
     "air.maxSpeed": num({ group: "Air", label: "Wind speed at full", def: 18, min: 0, max: 40, step: 0.5, unit: "m/s", hint: "What world.windStrength = 1 means in metres per second." }),
     "air.speedup": num({ group: "Air", label: "Slope speed-up", def: 1.2, min: 0, max: 4, step: 0.05, hint: "How much a windward face accelerates the flow. This is the term that strips a stoss face and fills the trough, so it is what actually migrates a dune." }),
     "air.separation": num({ group: "Air", label: "Separation slope", def: 0.62, min: 0.05, max: 2, step: 0.01, hint: "Lee slope at which the flow fully detaches, as a gradient — 0.62 is about 32 degrees, near the angle of repose, which is where a real slip face sits. Detachment begins at half of it." }),
+    "airborne.liftRate": num({ group: "Air", label: "Lift rate", def: 1.4, min: 0, max: 8, step: 0.05, hint: "How fast loose material past liftThreshold leaves the ground where the shear is high enough. Scaled per element by windSusceptibility." }),
+    "airborne.settleRate": num({ group: "Air", label: "Settle rate", def: 2.2, min: 0, max: 12, step: 0.1, hint: "How fast suspended material drops out where the flow has slowed or separated. This is what builds a slip face." }),
     "air.gustScale": num({ group: "Air", label: "Gust scale", def: 0.02, min: 0.002, max: 0.2, step: 0.002, unit: "1/m", advanced: true }),
     "air.gustAmount": num({ group: "Air", label: "Gust amount", def: 0.35, min: 0, max: 1, step: 0.01, advanced: true, hint: "Gusts advect downwind rather than pulsing in place." }),
 

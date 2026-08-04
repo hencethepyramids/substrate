@@ -2,7 +2,6 @@ import { ProceduralTexture } from "@babylonjs/core/Materials/Textures/Procedural
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import { Constants } from "@babylonjs/core/Engines/constants";
 import { Vector2, Vector4 } from "@babylonjs/core/Maths/math.vector";
-import type { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import type { Scene } from "@babylonjs/core/scene";
 import type { TargetCamera } from "@babylonjs/core/Cameras/targetCamera";
 import type { WebGPUPerfCounter } from "@babylonjs/core/Engines/WebGPU/webgpuPerfCounter";
@@ -39,6 +38,16 @@ import relaxSource from "../shaders/substrateRelax.fragment.wgsl?raw";
  *
  * Allocation-free after construction.
  */
+
+/**
+ * Anything with the setter shape — a ShaderMaterial or a ProceduralTexture. Phase 5's
+ * airborne pass binds this buffer as a texture just as the terrain does.
+ */
+export interface SubstrateTarget {
+    setTexture(name: string, texture: ProceduralTexture): unknown;
+    setVector2(name: string, value: Vector2): unknown;
+    setFloat(name: string, value: number): unknown;
+}
 
 /** Uniforms a material needs to declare to include substrateBuffer. */
 export const SUBSTRATE_UNIFORMS = ["sbSubOrigin", "sbSubExtent", "sbSubSize", "sbSubFade"] as const;
@@ -311,12 +320,25 @@ export class Substrate {
      * would be a frame stale half the time and would alias the target being written the
      * other half.
      */
-    bindTo(material: ShaderMaterial): void {
+    bindTo(material: SubstrateTarget): void {
         material.setTexture("sbSubTex", this._targets[this._front]);
     }
 
+    /**
+     * This frame's whole-texel window scroll, and where the heightfield starts. Phase 5's
+     * airborne buffer rides the same window, and takes both from here rather than
+     * computing a second copy that could drift.
+     */
+    get shift(): Vector2 {
+        return this._shift;
+    }
+
+    get fieldOrigin(): Vector2 {
+        return this._fieldOrigin;
+    }
+
     /** Push the window uniforms every consumer shares. Once per frame, per material. */
-    pushTo(material: ShaderMaterial): void {
+    pushTo(material: SubstrateTarget): void {
         material.setVector2("sbSubOrigin", this._origin);
         material.setFloat("sbSubExtent", this._extent);
         material.setFloat("sbSubSize", this._size);

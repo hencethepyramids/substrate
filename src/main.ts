@@ -18,6 +18,7 @@ import { Terrain } from "./terrain/terrain";
 import { Substrate } from "./substrate/substrate";
 import { Carve } from "./substrate/carve";
 import { AirField } from "./air/airField";
+import { Airborne } from "./air/airborne";
 import { PlaceholderCharacter } from "./character/placeholder";
 import { registerShaderIncludes } from "./shaders/lib/register";
 import { Overlay } from "./ui/overlay";
@@ -58,6 +59,7 @@ async function boot(): Promise<void> {
     let shadows!: Shadows;
     let terrain!: Terrain;
     let substrate!: Substrate;
+    let airborne!: Airborne;
     let character!: PlaceholderCharacter;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
@@ -92,6 +94,9 @@ async function boot(): Promise<void> {
         substrate = new Substrate(scene, settings, biome, terrain.field);
         terrain.setSubstrate(substrate);
         terrain.setAir(air);
+        // Rides the substrate's own window, so it is constructed with it and after it.
+        airborne = new Airborne(scene, settings, biome, terrain.field, substrate, air);
+        terrain.setAirborne(airborne);
         character = new PlaceholderCharacter(scene, settings, sky, shadows);
         shadows.setCasters(terrain.mesh, [character.mesh]);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
@@ -115,6 +120,7 @@ async function boot(): Promise<void> {
     // probe that checks where a carve lands should run against the real field.
     loader.add("substrate buffer", 2, async (report) => {
         await substrate.prepare(report);
+        await airborne.prepare();
     });
 
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
@@ -134,6 +140,7 @@ async function boot(): Promise<void> {
         for (let attempt = 0; attempt < 180; attempt++) {
             sky.update(rig.camera);
             substrate.update(rig.camera, 1 / 60);
+            airborne.update(1 / 60);
             terrain.update(rig.camera);
             character.update(rig.camera);
             shadows.update(rig.camera);
@@ -166,6 +173,7 @@ async function boot(): Promise<void> {
         // whenever the atlas is resized, so a cached reference would go stale.
         gpu.register("shadow cascades", () => shadows.gpuTime);
         gpu.register("substrate", () => substrate.gpuTime);
+        gpu.register("airborne", () => airborne.gpuTime);
         registerActions(overlay, settings, mover, rig, terrain, substrate, carve);
     });
 
@@ -248,6 +256,9 @@ async function boot(): Promise<void> {
         // Then the carve sources, then the step that consumes them.
         carve.update(input, mover, substrate, simDt);
         substrate.update(rig.camera, simDt);
+        // After the ground: it reads the mass the substrate has just finished writing,
+        // on that pass's own window.
+        airborne.update(simDt);
         perf.end(S_SUBSTRATE);
 
         perf.begin(S_UNIFORMS);
@@ -281,6 +292,7 @@ async function boot(): Promise<void> {
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
         overlay.dispose();
+        airborne.dispose();
         substrate.dispose();
         terrain.dispose();
         character.dispose();
