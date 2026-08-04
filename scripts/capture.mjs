@@ -146,6 +146,22 @@ if (carves > 0) {
     }, carves);
 }
 
+// Optionally drop a pit right where the character stands — the Phase 3 acceptance test,
+// and the quickest way to see whether the clipmap is displacing by the buffer at all.
+if (argv.has("pit")) {
+    await page.evaluate(async (depth) => {
+        const app = window.__substrate;
+        const wait = () => new Promise((r) => requestAnimationFrame(() => r()));
+        // A trench in front of the camera rather than a round hole: a long edge shows a
+        // silhouette, and a silhouette is the thing a normal map cannot fake.
+        for (let i = 0; i < 12; i++) {
+            const t = (i - 6) * 0.55;
+            app.substrate.stamp(app.mover.position.x + t, app.mover.position.z + 3.5, 0.85, depth);
+            await wait();
+        }
+    }, Number(argv.get("pit")) || 0.6);
+}
+
 // Optionally set fire to the ground first, for Phase 6's questions.
 if (argv.has("ignite")) {
     await page.evaluate((rate) => {
