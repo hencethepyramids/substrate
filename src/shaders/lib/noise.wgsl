@@ -109,16 +109,23 @@ fn sbRidgedD(p0: vec2f, octaves: i32, lacunarity: f32, gain: f32) -> vec3f {
 
 // -- domain transforms, each with its Jacobian --------------------------------
 
-/// Rotate into the wind frame and stretch along it. Stretch > 1 elongates features
-/// across the wind, which is what makes dune crests read as transverse ridges
-/// rather than as blobs.
+/// Rotate into the wind frame and elongate features ACROSS it, so a crest line runs
+/// perpendicular to the wind and the dune presents a face to it. That is what a
+/// transverse dune is, and the steep along-wind profile is the whole point of one.
+///
+/// THE CROSS-WIND COMPONENT IS THE ONE DIVIDED. Dividing the along-wind component
+/// instead — which this did until it was measured — elongates features along the wind
+/// into longitudinal ridges and divides every along-wind slope by `stretch`. At the
+/// desert's 4.2 that turned a dune field into a set of gentle ramps with no slip face
+/// anywhere in it: 3.5 degrees at the median, 21 at the very steepest, measured by
+/// scripts/checkWind.mjs over the whole field.
 fn sbAniso(p: vec2f, dir: vec2f, stretch: f32) -> vec2f {
-    return vec2f(dot(p, dir) / stretch, dot(p, vec2f(-dir.y, dir.x)));
+    return vec2f(dot(p, dir), dot(p, vec2f(-dir.y, dir.x)) / stretch);
 }
 
 /// Bring a gradient measured in sbAniso space back to world space: dn/dp = M^T dn/dq.
 fn sbAnisoGrad(g: vec2f, dir: vec2f, stretch: f32) -> vec2f {
-    return vec2f(g.x * dir.x / stretch - g.y * dir.y, g.x * dir.y / stretch + g.y * dir.x);
+    return vec2f(g.x * dir.x - g.y * dir.y / stretch, g.x * dir.y + g.y * dir.x / stretch);
 }
 
 struct SbShear {

@@ -111,6 +111,15 @@ between "builds" and "the driver will accept this".
   Jacobian. That is what allows the fBm to *damp its own detail by slope*, which is
   the single largest contributor to the result reading as landform rather than as
   noise, and it gives normals for free.
+- **The dunes were longitudinal for four phases.** `sbAniso` divided the *along-wind*
+  coordinate by `duneStretch`, elongating features along the wind into ridges running
+  parallel to it — while its own comment said it made "transverse ridges". A transverse
+  crest runs perpendicular to the wind, so the elongation has to be across it. The bug
+  was invisible by eye (a dune field looks like a dune field either way) and only showed
+  up when Phase 5 measured the slope distribution and found the desert was the *flattest*
+  of the three biomes: 3.5° at the median, 21° at the very steepest, with no slip face
+  anywhere. Dividing the correct component gives 9.4° and 36.1° — past sand's 34° repose
+  — with no change to a single registry number. See [shots/phase1-desert-dunes.png](shots/phase1-desert-dunes.png).
 - **One heightfield function.** [heightfield.wgsl](src/shaders/lib/heightfield.wgsl)
   is the same construction for all three biomes — swell, wind-sheared dunes, drifts,
   ridged levees, outcrops, channels — differing only by the `TerrainDef` numbers in

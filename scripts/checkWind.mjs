@@ -44,12 +44,18 @@ await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 30000 });
 await page.waitForFunction(() => (window.__substrate ?? null) !== null, null, { timeout: 90000 });
 await page.waitForTimeout(2500);
 
-const result = await page.evaluate(async () => {
+const biomeArg = (process.argv.find((a) => a.startsWith("--biome=")) ?? "--biome=desert").split("=")[1];
+
+const result = await page.evaluate(async (biome) => {
     const app = window.__substrate;
-    app.settings.set("world.biome", "desert");
+    app.settings.set("world.biome", biome);
     app.settings.set("world.windStrength", 0.9);
     app.settings.set("sys.air", true);
-    await new Promise((r) => setTimeout(r, 1200));
+    // A biome switch queues a rebake of the 4096 field plus its 67 MB CPU readback.
+    // Measuring before that lands would measure the previous element's terrain.
+    for (let i = 0; i < 120 && app.terrain.field.baking; i++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 2500));
+    for (let i = 0; i < 120 && app.terrain.field.baking; i++) await new Promise((r) => setTimeout(r, 100));
 
     const wind = { x: app.air.base.x, y: app.air.base.y };
     const speed = Math.hypot(wind.x, wind.y);
@@ -98,8 +104,9 @@ const result = await page.evaluate(async () => {
         leeP97: pct(lee, 0.97),
         leeMax: lee[lee.length - 1],
         allP99: pct(all, 0.99),
+        biome: app.settings.get("world.biome"),
     };
-});
+}, biomeArg);
 
 await browser.close();
 
@@ -108,6 +115,7 @@ if (result.error) {
     process.exit(1);
 }
 
+console.log(`biome          ${result.biome}`);
 console.log(`bearing        ${result.bearing} deg`);
 console.log(`wind vector    (${result.windDir.x.toFixed(3)}, ${result.windDir.y.toFixed(3)}) at ${result.speed.toFixed(1)} m/s`);
 console.log(`samples        ${result.count}`);
