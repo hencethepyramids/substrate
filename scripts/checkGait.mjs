@@ -131,6 +131,8 @@ await page.evaluate(() => {
             duty: app.gait.duty,
             legR,
             legL,
+            vertR: hipR[1] - r[1],
+            flatR: Math.hypot(hipR[0] - r[0], hipR[2] - r[2]),
             facing: app.mover.facing,
             stand: app.gait.standing,
             // Cloth stretch EVERY FRAME, not once at the end. A solver that is losing it
@@ -470,7 +472,15 @@ console.log("");
   console.log(`  stand blend while walking       p50 ${(st[Math.floor(st.length/2)] ?? -1).toFixed(3)}, max ${(st[st.length-1] ?? -1).toFixed(3)}  (0 = fully walking)`);
   const hips = log.filter((f) => f.speed > 0.5).map((f) => (f.r[1] + f.l[1]) / 2);
   const clamped = ext.filter((v) => v > 0.985).length / Math.max(ext.length, 1);
-    console.log(`  leg extension p50/p90/max       ${(eq(0.5) * 100).toFixed(0)}% / ${(eq(0.9) * 100).toFixed(0)}% / ${(eq(1) * 100).toFixed(0)}% of leg length`);
+    {
+    const w = log.filter((f) => f.speed > 0.5);
+    const vs = w.map((f) => f.vertR).sort((a,b)=>a-b);
+    const fl = w.map((f) => f.flatR).sort((a,b)=>a-b);
+    const md = (a) => a[Math.floor(a.length/2)] ?? 0;
+    console.log(`  hip above ankle p50/max         ${md(vs).toFixed(3)} / ${(vs[vs.length-1] ?? 0).toFixed(3)} m   (leg is 0.860)`);
+    console.log(`  foot fore-aft from hip p50/max  ${md(fl).toFixed(3)} / ${(fl[fl.length-1] ?? 0).toFixed(3)} m`);
+  }
+  console.log(`  leg extension p50/p90/max       ${(eq(0.5) * 100).toFixed(0)}% / ${(eq(0.9) * 100).toFixed(0)}% / ${(eq(1) * 100).toFixed(0)}% of leg length`);
     console.log(`  at full stretch (IK clamping)   ${(clamped * 100).toFixed(1)}% of walking frames`);
 }
 console.log(`  cloth edge stretch              p50 ${(stretches[Math.floor(stretches.length / 2)] * 100).toFixed(1)}%, p99 ${(stretchP99 * 100).toFixed(1)}%, peak ${(stretches[stretches.length - 1] * 100).toFixed(1)}%`);

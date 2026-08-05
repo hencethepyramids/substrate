@@ -382,7 +382,7 @@ export class Gait {
         // Real walking carries the hip at about 0.88 of leg length rather than 0.97, and
         // that difference is the entire knee bend. Standing gets the tall pose back, and
         // the crossfade is the same `moving` the rest of the gait already uses.
-        const standY = P.ankle + LEG * (0.97 - 0.09 * moving);
+        const standY = P.ankle + LEG * (0.97 - 0.14 * moving);
         const bob = drop * 0.5 * (1 + Math.cos(2 * Math.PI * stepPhase)) * moving;
 
         // Weight shifts onto whichever foot is in mid-stance: the right at half-integer
