@@ -300,7 +300,15 @@ export class Gait {
         this._distancePrev = mover.distance;
         const stepPhase = this._stepPhase;
         const half = s["char.stanceWidth"] * 0.5;
-        const lift = s["char.stepLift"] * Math.min(0.6 + 0.4 * speedRatio, 2);
+        // THE KNEE HAS TO CYCLE, NOT SCYTHE.
+        //
+        // This was another speedRatio, so the swing foot cleared the ground by the same
+        // 13 cm at 3.2 m/s as it does at a stroll. Thirteen centimetres is a walk's
+        // clearance; a runner brings the heel up towards the backside and the foot passes
+        // 40 cm off the deck. With too little lift the leg swings through almost straight,
+        // which is most of what made the cycle read as stiff — the legs looked like they
+        // were being swept forward rather than picked up and put down.
+        const lift = s["char.stepLift"] * (0.9 + 2.6 * this._run);
 
         // Where the body is heading, for predicting where a swinging foot lands. Facing
         // when almost stopped, because a near-zero velocity has no direction.
@@ -426,7 +434,7 @@ export class Gait {
             this._ankle[i * 3 + 2] = az;
         }
 
-        this._pose(mover, stepPhase, stride, speedRatio);
+        this._pose(mover, stepPhase, stride);
     }
 
     private _setPlant(i: number, x: number, z: number): void {
@@ -436,7 +444,7 @@ export class Gait {
     }
 
     /** Build the whole pose, in character space, and bake the palette. */
-    private _pose(mover: Mover, stepPhase: number, stride: number, speedRatio: number): void {
+    private _pose(mover: Mover, stepPhase: number, stride: number): void {
         const s = this._settings.v;
         const sk = this.skeleton;
         const moving = 1 - this._stand;
@@ -485,7 +493,7 @@ export class Gait {
         // into speed: the line from your feet through your centre of mass has to stay
         // over the ground you are pushing against.
         const climb = clampAbs(this._slopeAlong(this._px, this._pz, this._sin, this._cos, 0.5), 0.8);
-        const leanZ = (Math.tan(s["char.lean"] * DEG) * Math.min(speedRatio, 2.4) * moving + climb * 0.32) * 1;
+        const leanZ = (Math.tan(s["char.lean"] * DEG) * (0.35 + 1.6 * this._run) * moving + climb * 0.32) * 1;
         const leanX = clampAbs((mover.speed * this._turn) / G, 0.55) * s["char.bank"];
 
         // NEVER ASK A LEG FOR MORE THAN IT HAS. The bob above is the flat-ground case of a
@@ -537,8 +545,8 @@ export class Gait {
         const rightX = 1 / rl;
         const rightY = -leanX / rl;
         const hipMid = sway + shift;
-        this._leg(B.thighR, B.shinR, B.footR, hipMid + rightX * P.hipHalf, pelvisY + rightY * P.hipHalf, 0, speedRatio);
-        this._leg(B.thighL, B.shinL, B.footL, hipMid - rightX * P.hipHalf, pelvisY - rightY * P.hipHalf, 1, speedRatio);
+        this._leg(B.thighR, B.shinR, B.footR, hipMid + rightX * P.hipHalf, pelvisY + rightY * P.hipHalf, 0);
+        this._leg(B.thighL, B.shinL, B.footL, hipMid - rightX * P.hipHalf, pelvisY - rightY * P.hipHalf, 1);
 
         // --- arms -----------------------------------------------------------
         //
@@ -595,7 +603,7 @@ export class Gait {
      * picks which point. Knees bend forward, splayed very slightly outward so they clear
      * each other at the bottom of a stride.
      */
-    private _leg(thigh: number, shin: number, foot: number, hx: number, hy: number, i: number, speedRatio: number): void {
+    private _leg(thigh: number, shin: number, foot: number, hx: number, hy: number, i: number): void {
         const sk = this.skeleton;
         const side = i === 0 ? 1 : -1;
 
@@ -680,7 +688,7 @@ export class Gait {
         const gaitPitch =
             (t < duty ? roll * smoothstep(0.55, 1, t / duty) : -roll * 0.7 * Math.sin((Math.PI * (t - duty)) / (1 - duty))) *
             (1 - this._stand) *
-            Math.min(0.7 + 0.3 * speedRatio, 1.5);
+            (0.8 + 0.6 * this._run);
 
         // AND THE GROUND'S OWN PITCH. A sole that stays level while the hill under it does
         // not is the tell that a character is walking on an idea of the terrain rather
