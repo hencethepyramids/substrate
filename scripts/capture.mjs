@@ -28,7 +28,16 @@ const argv = new Map();
 const overrides = [];
 for (const a of process.argv.slice(2)) {
     const m = a.match(/^--([^=]+)(?:=(.*))?$/);
-    if (!m) continue;
+    // LOUDLY, because the alternative cost me an afternoon. `--set sys.substrate=false`
+    // with a space parses as two arguments, the second of which does not start with `--`;
+    // the old loop skipped it and captured a scene with the subsystem still on. Nothing
+    // said so, and the resulting image was a perfectly plausible answer to a question
+    // nobody had asked. A capture that quietly ignores half its arguments is not an
+    // instrument, so an argument this cannot parse is now fatal.
+    if (!m) {
+        console.error(`capture: cannot parse argument "${a}" — flags are --name or --name=value, and overrides are --set=key=value with no space`);
+        process.exit(2);
+    }
     if (m[1] === "set") overrides.push(m[2] ?? "");
     else argv.set(m[1], m[2] ?? "true");
 }
@@ -56,6 +65,15 @@ if (argv.has("sun")) settings["world.sunElevation"] = Number(argv.get("sun"));
 if (argv.has("wind")) settings["world.windStrength"] = Number(argv.get("wind"));
 if (argv.has("bearing")) settings["world.windBearing"] = Number(argv.get("bearing"));
 if (argv.has("tonemap")) settings["post.tonemap"] = argv.get("tonemap");
+// A/B DIFFS NEED A STILL SUBJECT. Two captures of the same build differ by a mean of
+// about 2 levels over a third of the frame, because the substrate, the smoke, the embers
+// and the spray all advance by however many frames fit in the settle window — and the
+// number of frames that fit is a property of the machine, not of the code. That noise is
+// larger than most of what a post pass legitimately changes, so a diff taken without this
+// flag measures the weather rather than the change. `--freeze` pauses the simulation from
+// the first frame, which makes the image a function of the camera, the sun and the
+// heightfield, all of which are deterministic.
+if (argv.get("freeze") === "true") settings["world.paused"] = true;
 // The overlay is a wall of text over the picture; off unless asked for.
 settings["ui.overlayOpen"] = argv.get("overlay") === "true";
 

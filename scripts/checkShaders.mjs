@@ -186,6 +186,29 @@ function check(where, raw) {
         }
     }
 
+    // mixing bitwise and arithmetic operators without parentheses
+    //
+    // WGSL declines to guess a precedence here and rejects the whole shader with
+    // "mixing '*' and '^' requires parenthesis". Nothing upstream of the driver knows:
+    // the expression is well-formed by every other measure, so a green build, a green
+    // typecheck and every other check in this file all pass, and the terrain renders
+    // black. The rule is narrow — an operand directly between an arithmetic operator and
+    // a bitwise one, with no bracket in between — so it does not fire on the parenthesised
+    // form that WGSL actually wants.
+    // The leading class must allow `)` — `u32(q.x) * K ^ ...` is the exact shape that
+    // caused this, and an operand very often ends in a closing bracket.
+    // The operand between the two operators must NOT contain a bracket: a `)` sitting
+    // there is precisely the parenthesis WGSL is asking for, so `(a * b) ^ c` is fine
+    // while `a * b ^ c` is not.
+    const MIXED = /[^\s({;,]\s*[*/%+-]\s*[\w.]+\s*(\^|\||&|<<|>>)(?![|&=])/g;
+    for (const line of src.split("\n")) {
+        // `->` and `>>=` are not bitwise shifts, and a comparison is not a mix.
+        const cleaned = line.replace(/->/g, "  ").replace(/[<>]=/g, "  ");
+        const m = MIXED.exec(cleaned);
+        MIXED.lastIndex = 0;
+        if (m) err(where, `mixing arithmetic with "${m[1]}" without parentheses — WGSL rejects this outright: ${line.trim()}`);
+    }
+
     // bare return in an entry point
     for (const m of src.matchAll(/@(fragment|vertex)\s+fn\s+(\w+)[\s\S]*?\n\}/g)) {
         if (/\breturn\s*;/.test(m[0])) {
@@ -310,12 +333,18 @@ for (const m of tsSource.matchAll(/"(\w+)"/g)) listedInTs.add(m[1]);
 // Uniforms Babylon supplies itself; never set by hand.
 const BUILT_IN = new Set(["world", "viewProjection", "view", "projection", "worldView", "worldViewProjection"]);
 
+// The one texture nobody binds: a PostProcess's input. Babylon names it `textureSampler`
+// by convention and wires the previous pass's output — or the scene target — to it. The
+// rule above is right for everything else and would be a false positive exactly here.
+const BUILT_IN_TEXTURES = new Set(["textureSampler"]);
+
 for (const n of declaredUniforms) {
     if (BUILT_IN.has(n)) continue;
     if (!listedInTs.has(n)) err("wgsl/ts", `uniform ${n} is declared in WGSL but never named in TypeScript — it will silently read as zero`);
     else if (!setInTs.has(n)) warn("wgsl/ts", `uniform ${n} is listed in TypeScript but never set — it will read as zero`);
 }
 for (const n of declaredTextures) {
+    if (BUILT_IN_TEXTURES.has(n)) continue;
     if (!setInTs.has(n)) err("wgsl/ts", `texture ${n} is declared in WGSL but no setTexture("${n}", ...) exists — the binding will be missing`);
 }
 for (const n of setInTs) {
