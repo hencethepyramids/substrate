@@ -14,7 +14,6 @@ import type { Substrate } from "../substrate/substrate";
 import type { AirField } from "../air/airField";
 import type { Fire } from "./fire";
 import { WORLD_GROUP } from "../render/sky";
-import { TONEMAPS } from "../core/settings";
 import { compileOrWarn } from "../core/loading";
 import embersVertex from "../shaders/embers.vertex.wgsl?raw";
 import embersFragment from "../shaders/embers.fragment.wgsl?raw";
@@ -107,7 +106,6 @@ export class Embers {
                     "emParams",
                     "emSpawn",
                     "emExposure",
-                    "sbTonemapMode",
                     "sbSubOrigin",
                     "sbSubExtent",
                     "sbSubSize",
@@ -194,7 +192,6 @@ export class Embers {
         this._spawn.set(s["embers.threshold"], 0);
         m.setVector2("emSpawn", this._spawn);
         m.setFloat("emExposure", s["render.exposure"]);
-        m.setFloat("sbTonemapMode", Math.max(0, TONEMAPS.indexOf(s["post.tonemap"] as (typeof TONEMAPS)[number])));
 
         this._substrate.bindTo(m);
         this._substrate.pushTo(m);

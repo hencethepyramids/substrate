@@ -17,7 +17,6 @@
 // Above substrateBrdf: the glints draw their facets from sbHash2, the one hash.
 #include<substrateNoise>
 #include<substrateBrdf>
-#include<substrateTonemap>
 // Below substrateNoise: the gusts ride on sbNoiseD.
 #include<substrateAir>
 #include<substrateAirborne>
@@ -165,6 +164,9 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let glint = sbGlints(input.vWorld.xz, n, half, uniforms.fGrain.x, uniforms.fGrain.y, dist) * uniforms.fGrain.z;
 
     var rgb: vec3f;
+    // Zero means "this is a raw quantity, not light" — see composite.fragment.wgsl. Most
+    // debug views are raw, so raw is the default and the three branches that shade set it.
+    var displayWeight = 0.0;
 
     if (debug == SB_DEBUG_NORMALS) {
         rgb = n * 0.5 + 0.5;
@@ -183,7 +185,8 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     } else if (debug == SB_DEBUG_SKY_IRRADIANCE) {
         // The SH term alone, no albedo and no sun. Hollows and north faces should
         // still be lit; if they are black, the ground bounce is not reaching them.
-        rgb = sbDisplay(sbShIrradiance(n) * exp2(exposure));
+        rgb = sbShIrradiance(n) * exp2(exposure);
+        displayWeight = 1.0;
     } else if (debug == SB_DEBUG_SHADOW_MAP) {
         // Raw sun visibility. Acne reads as speckle on lit slopes, peter-panning as
         // a gap between a caster and its shadow, and a cascade seam as a hard line
@@ -212,7 +215,8 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     } else if (debug == SB_DEBUG_SURF_SPECULAR) {
         // The specular lobe alone, no albedo. Sand should show a tight second lobe
         // riding inside the broad one; snow should not, because its lobe mix is zero.
-        rgb = sbDisplay(specular * sbSunIrradiance() * shadow * exp2(exposure));
+        rgb = specular * sbSunIrradiance() * shadow * exp2(exposure);
+        displayWeight = 1.0;
     } else if (debug == SB_DEBUG_SURF_ROUGHNESS) {
         // Black is mirror, white is fully rough. Footprints should read DARKER than the
         // ground around them — packed material is smoother.
@@ -319,11 +323,12 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
             color = color * through + sbHazeColor(viewDir) * SB_SMOKE_ALBEDO * (1.0 - through);
         }
 
-        // AgX by default. Phase 4's specular is physically correct and therefore
-        // enormous — a glitter path at a low sun runs about twenty times over white —
-        // so a curve with a shoulder is not a finishing touch here, it is the only way
-        // the highlight is displayable at all.
-        rgb = sbDisplay(color * exp2(exposure));
+        // Scene-referred radiance, and it leaves here that way. Phase 4's specular is
+        // physically correct and therefore enormous — a glitter path at a low sun runs
+        // about twenty times over white — and keeping that 20 intact all the way to the
+        // composite is precisely what lets bloom know it was a highlight.
+        rgb = color * exp2(exposure);
+        displayWeight = 1.0;
     }
 
     // Where the buffer reaches. Its edge ramps to zero by design so that geometry never
@@ -336,5 +341,5 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     rgb = mix(rgb, rgb * 0.6 + vec3f(0.0, 0.18, 0.09), wInside * 0.25);
     rgb = mix(rgb, vec3f(0.1, 1.0, 0.5), smoothstep(0.015, 0.0, wEdge) * wInside * 0.8);
 
-    fragmentOutputs.color = vec4f(rgb, 1.0);
+    fragmentOutputs.color = vec4f(rgb, displayWeight);
 }

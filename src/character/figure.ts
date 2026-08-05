@@ -7,7 +7,6 @@ import { Vector3, Vector4 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Settings } from "../core/settings";
-import { TONEMAPS } from "../core/settings";
 import { Sky, SKY_UNIFORMS, SKY_SAMPLERS, WORLD_GROUP } from "../render/sky";
 import { Shadows, SHADOW_UNIFORMS, SHADOW_SAMPLERS } from "../render/shadows";
 import { compileOrWarn } from "../core/loading";
@@ -80,7 +79,7 @@ export class Figure {
             { vertexSource: figureVertex, fragmentSource: figureFragment },
             {
                 attributes: ["position", "normal", "skin"],
-                uniforms: ["viewProjection", "skBones", "fgCloth", "fgSkin", "fgTint", "fgParams", "fgCameraPos", "sbTonemapMode", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS],
+                uniforms: ["viewProjection", "skBones", "fgCloth", "fgSkin", "fgTint", "fgParams", "fgCameraPos", ...SKY_UNIFORMS, ...SHADOW_UNIFORMS],
                 samplers: [...SKY_SAMPLERS, ...SHADOW_SAMPLERS],
                 shaderLanguage: ShaderLanguage.WGSL,
             },
@@ -147,7 +146,6 @@ export class Figure {
         this._params.set(s["render.exposure"], s["char.clothRoughness"], s["char.skinRoughness"], s["char.subsurface"]);
         m.setVector4("fgParams", this._params);
         m.setVector3("fgCameraPos", this._camera);
-        m.setFloat("sbTonemapMode", Math.max(0, TONEMAPS.indexOf(s["post.tonemap"] as (typeof TONEMAPS)[number])));
         this._sky.pushTo(m);
         this._shadows.pushTo(m);
 

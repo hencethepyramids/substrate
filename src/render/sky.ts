@@ -7,7 +7,7 @@ import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { Vector2, Vector3, Vector4 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import type { TargetCamera } from "@babylonjs/core/Cameras/targetCamera";
-import { TONEMAPS, type Settings } from "../core/settings";
+import { type Settings } from "../core/settings";
 import type { BiomeState } from "../core/biome";
 import type { ElementDef } from "../elements/types";
 import { compileOrWarn, nextFrame } from "../core/loading";
@@ -61,11 +61,13 @@ const SUN_IRRADIANCE = 4.0;
 /**
  * Uniforms a material needs to declare to include the sky lighting headers.
  *
- * `sbTonemapMode` rides along because every material that shades also has to encode,
- * and the dome and the ground under it have to be on the SAME curve or they cannot be
- * read against each other. One push, one source of truth, same argument as sbSunDir.
+ * `sbTonemapMode` used to ride along here, on the argument that a material which shades
+ * also has to encode, and that the dome and the ground under it must be on the same
+ * curve. Phase 9 pass A keeps the conclusion and removes the mechanism: materials emit
+ * linear radiance and the composite owns the curve, so there is now exactly one place
+ * that could put them on different transfers, and it does not.
  */
-export const SKY_UNIFORMS = ["sbSunDir", "sbTonemapMode"] as const;
+export const SKY_UNIFORMS = ["sbSunDir"] as const;
 /** Samplers likewise. Bind them with `sky.bindTo(material)`. */
 export const SKY_SAMPLERS = ["sbSkyLut", "sbSkyData"] as const;
 
@@ -371,7 +373,6 @@ export class Sky {
     /** Push the uniforms every lit material shares. Call once per frame, per material. */
     pushTo(material: ShaderMaterial): void {
         material.setVector3("sbSunDir", this.sunDir);
-        material.setFloat("sbTonemapMode", Math.max(0, TONEMAPS.indexOf(this._settings.v["post.tonemap"] as (typeof TONEMAPS)[number])));
     }
 
     dispose(): void {

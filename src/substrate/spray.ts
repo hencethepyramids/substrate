@@ -15,7 +15,6 @@ import type { Mover } from "../core/mover";
 import type { AirField } from "../air/airField";
 import type { Substrate } from "./substrate";
 import { Sky, SKY_UNIFORMS, SKY_SAMPLERS, WORLD_GROUP } from "../render/sky";
-import { TONEMAPS } from "../core/settings";
 import { compileOrWarn } from "../core/loading";
 import sprayVertex from "../shaders/spray.vertex.wgsl?raw";
 import sprayFragment from "../shaders/spray.fragment.wgsl?raw";
@@ -108,7 +107,6 @@ export class Spray {
                     "spCameraPos",
                     "spAlbedo",
                     "spExposure",
-                    "sbTonemapMode",
                     "sbSubOrigin",
                     "sbSubExtent",
                     "sbSubSize",
@@ -203,7 +201,6 @@ export class Spray {
         m.setVector3("spCameraPos", this._camera);
         m.setColor3("spAlbedo", this._albedo);
         m.setFloat("spExposure", s["render.exposure"]);
-        m.setFloat("sbTonemapMode", Math.max(0, TONEMAPS.indexOf(s["post.tonemap"] as (typeof TONEMAPS)[number])));
 
         this._substrate.bindTo(m);
         this._substrate.pushTo(m);

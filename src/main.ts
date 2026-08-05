@@ -14,6 +14,7 @@ import { CameraRig } from "./core/cameraRig";
 import { Mover } from "./core/mover";
 import { Sky } from "./render/sky";
 import { Shadows } from "./render/shadows";
+import { Post } from "./render/post";
 import { Terrain } from "./terrain/terrain";
 import { Substrate } from "./substrate/substrate";
 import { Carve } from "./substrate/carve";
@@ -76,6 +77,7 @@ async function boot(): Promise<void> {
     let airProbe!: AirProbe;
     let cloak!: Cloak;
     let spray!: Spray;
+    let post!: Post;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
 
@@ -97,6 +99,9 @@ async function boot(): Promise<void> {
         gpu = new GpuTimings(engine, settings, capability.has("timestamp-query"));
         input = new Input(canvas);
         rig = new CameraRig(scene, settings);
+        // Before anything draws. The camera's first post process decides the format of
+        // the target the scene renders into, so the HDR buffer only exists if this does.
+        post = new Post(scene, settings, rig.camera);
     });
 
     loader.add("clipmap mesh", 2, () => {
@@ -214,6 +219,7 @@ async function boot(): Promise<void> {
                 `substrate relax ${substrate.compiled ? "ok" : "FAILED"}, ` +
                 `character material ${character.compiled ? "ok" : "FAILED"}, ` +
                 `cloak ${cloak.compiled ? "ok" : "FAILED"}, ` +
+                `composite ${post.compiled ? "ok" : "FAILED"}, ` +
                 `height mirror ${terrain.field.mirrorValid ? "ok" : "FAILED"}, ` +
                 `ground at origin ${terrain.field.sampleHeight(0, 0).toFixed(2)} m`,
         );
@@ -386,6 +392,7 @@ async function boot(): Promise<void> {
         substrate.dispose();
         terrain.dispose();
         cloak.dispose();
+        post.dispose();
         airProbe.dispose();
         character.dispose();
         groundProbe.dispose();

@@ -17,7 +17,6 @@
 #include<substrateShadow>
 #include<substrateNoise>
 #include<substrateBrdf>
-#include<substrateTonemap>
 
 varying vWorld: vec3f;
 varying vNormal: vec3f;
@@ -68,5 +67,5 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let transmittance = sbAerial(dist * 0.001);
     color = color * transmittance + sbHazeColor(-v) * (vec3f(1.0) - transmittance);
 
-    fragmentOutputs.color = vec4f(sbDisplay(color * exp2(uniforms.fgParams.x)), 1.0);
+    fragmentOutputs.color = vec4f(color * exp2(uniforms.fgParams.x), 1.0);
 }

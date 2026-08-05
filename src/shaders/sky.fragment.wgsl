@@ -13,7 +13,6 @@
 #include<substrateHeightfield>
 #include<substrateTerrainParams>
 #include<substrateFarField>
-#include<substrateTonemap>
 
 varying vRay: vec3f;
 
@@ -51,7 +50,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         // beside it does not have. Same exposure and same transfer as the terrain's
         // version of this view, so the dome and the ground can be read against each
         // other rather than against two different curves.
-        rgb = sbDisplay(sbShIrradiance(dir) * exp2(uniforms.skParams.x));
+        rgb = sbShIrradiance(dir) * exp2(uniforms.skParams.x);
     } else {
         var color = raw.rgb;
 
@@ -98,9 +97,11 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 
         color = color * exp2(uniforms.skParams.x);
 
-        // The same curve the ground is on. A dome and the terrain under it get read
-        // against each other, so two transfers would make both untrustworthy.
-        rgb = sbDisplay(color);
+        // Radiance, unmapped — the composite is now the only thing that owns the
+        // curve, which is a stronger version of the guarantee this comment used to make.
+        // A dome and the ground under it are read against each other, and there is no
+        // longer any way for them to end up on two different transfers.
+        rgb = color;
     }
 
     fragmentOutputs.color = vec4f(rgb, 1.0);

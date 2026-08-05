@@ -8,7 +8,6 @@
 // noise library comes along even though an ember only ever calls sbEmissive.
 #include<substrateNoise>
 #include<substrateBrdf>
-#include<substrateTonemap>
 
 varying vCorner: vec2f;
 varying vGlow: f32;
@@ -27,7 +26,10 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // Full phase, because an ember IS the molten material, not the crust over it.
     let radiance = sbEmissive(1.0, 1.0) * alpha * exp2(uniforms.emExposure);
 
-    // Additive: the blend state adds this to what is already there, so the display
-    // transfer runs on the sum rather than on the spark alone. Alpha carries nothing.
-    fragmentOutputs.color = vec4f(sbTonemap(radiance), 1.0);
+    // Additive, and now additive in the space where addition means something. Two
+    // sparks overlapping used to sum two tonemapped values, which double-counts the
+    // shoulder and makes the pair dimmer than one bright spark; they now sum as light
+    // and the curve runs once over the total. Alpha is the composite's transform
+    // weight — a spark is light, so 1.
+    fragmentOutputs.color = vec4f(radiance, 1.0);
 }

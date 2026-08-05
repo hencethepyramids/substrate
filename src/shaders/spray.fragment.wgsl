@@ -13,7 +13,6 @@
 #include<substrateSh>
 #include<substrateSkyData>
 #include<substrateAtmosphere>
-#include<substrateTonemap>
 
 varying vCorner: vec2f;
 varying vGlow: f32;
@@ -40,5 +39,5 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let transmittance = sbAerial(input.vDist * 0.001);
     let hazed = lit * transmittance + sbHazeColor(input.vView) * (vec3f(1.0) - transmittance);
 
-    fragmentOutputs.color = vec4f(sbDisplay(hazed * exp2(uniforms.spExposure)), alpha);
+    fragmentOutputs.color = vec4f(hazed * exp2(uniforms.spExposure), alpha);
 }
