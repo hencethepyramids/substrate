@@ -10,6 +10,8 @@ const KEY_BACK = ["KeyS", "ArrowDown"];
 const KEY_LEFT = ["KeyA", "ArrowLeft"];
 const KEY_RIGHT = ["KeyD", "ArrowRight"];
 const KEY_SPRINT = ["ShiftLeft", "ShiftRight"];
+/** Hold to slide. Ctrl rather than Space, which Phase 9 will want for a jump. */
+const KEY_SLIDE = ["ControlLeft", "ControlRight"];
 
 export class Input {
     /** Local move intent. x = strafe (+right), y = forward (+forward). Length <= 1. */
@@ -17,6 +19,8 @@ export class Input {
     /** True while any movement key is held. */
     moving = false;
     sprint = false;
+    /** Held: drop onto the surface and let gravity do the work. */
+    slide = false;
     /** Right mouse held — the carve input (Phase 8). */
     carve = false;
     /** Accumulated mouse delta in raw pixels since the last endFrame(). */
@@ -123,6 +127,7 @@ export class Input {
         }
 
         this.sprint = anyDown(this._down, KEY_SPRINT);
+        this.slide = anyDown(this._down, KEY_SLIDE);
     }
 
     /** Zero the accumulated deltas. Call at the bottom of the frame, after everything has read them. */

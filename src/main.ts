@@ -273,7 +273,9 @@ async function boot(): Promise<void> {
         const simDt = settings.v["world.paused"] ? 0 : perf.dt * settings.v["world.timeScale"];
 
         perf.begin(S_SIM);
-        mover.update(input, rig, simDt);
+        // The gait supplies the surface, so the body and the feet cannot disagree about
+        // which ground they are on — including a wake carved into it a moment ago.
+        mover.update(input, rig, gait, simDt);
         perf.end(S_SIM);
 
         perf.begin(S_GROUND);

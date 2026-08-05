@@ -80,3 +80,6 @@ Pass E hung a cloth on the back, driven by the air field.
   middle has to put it somewhere.
 - `phase8-wake-desert.png` — the same run in sand, which slumps its channel back toward
   the angle of repose while snow holds the wall. Same code, different element block.
+- `phase8-slide-snow.png` — snow, sun 14, sliding off a 63 deg face found by
+  `capture.mjs --steep`. The slide crouch, and the wake it carved running back up the
+  slope behind. Speed here is gravity's, not the player's: sliding has no target speed.

@@ -239,6 +239,11 @@ export const SCHEMA = {
     "char.footRoll": num({ group: "Character", label: "Foot roll", def: 26, min: 0, max: 60, step: 1, unit: "deg", advanced: true }),
     "char.lean": num({ group: "Character", label: "Forward lean", def: 9, min: 0, max: 30, step: 0.5, unit: "deg", advanced: true }),
     "char.bank": num({ group: "Character", label: "Bank into turns", def: 1, min: 0, max: 2, step: 0.05, advanced: true, hint: "Scales the real balance angle, tan(bank) = v*omega/g. 1 is what physics asks for." }),
+    // Traversal. A walk is gravity plus a lot of grip; a slide is gravity plus very little.
+    "char.slopeWalk": num({ group: "Character", label: "Slope pull, walking", def: 0.35, min: 0, max: 1, step: 0.01, hint: "Share of the along-slope gravity a walking body feels. Boots grip; they do not weld." }),
+    "char.slopeClimb": num({ group: "Character", label: "Climb cost", def: 0.55, min: 0, max: 2, step: 0.05, hint: "How much a gradient takes off the top speed when heading up it." }),
+    "char.slideFriction": num({ group: "Character", label: "Slide friction", def: 0.3, min: 0.02, max: 4, step: 0.01, unit: "1/s", hint: "Low is ice, high is gravel. What the hill gives, this takes back." }),
+    "char.slideSteer": num({ group: "Character", label: "Slide steering", def: 7, min: 0, max: 30, step: 0.5, unit: "m/s2", hint: "Steering authority while sliding. You lean; you do not walk." }),
     "char.footRadius": num({ group: "Character", label: "Foot radius", def: 0.12, min: 0.02, max: 0.6, step: 0.01, unit: "m" }),
     "char.footDepth": num({ group: "Character", label: "Foot depth", def: 0.09, min: 0, max: 0.6, step: 0.005, unit: "m", hint: "At walking pace; a run presses harder. The load is the character's, the response is the element's." }),
     "char.clothRoughness": num({ group: "Character", label: "Cloth roughness", def: 0.72, min: 0.04, max: 1, step: 0.01, advanced: true }),

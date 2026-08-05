@@ -162,6 +162,35 @@ if (argv.has("pit")) {
     }, Number(argv.get("pit")) || 0.6);
 }
 
+// Optionally start on the steepest ground nearby. Sliding is a hill mechanic, so testing
+// it on the gentle ground at the origin measures nothing — this project's terrain has a
+// median slope around nine degrees and the interesting faces have to be gone and found.
+if (argv.has("steep")) {
+    const found = await page.evaluate((radius) => {
+        const app = window.__substrate;
+        const f = app.terrain.field;
+        let best = { x: 0, z: 0, grade: -1 };
+        for (let i = 0; i < 4000; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const r = Math.sqrt(Math.random()) * radius;
+            const x = Math.cos(a) * r;
+            const z = Math.sin(a) * r;
+            const d = 0.6;
+            const gx = (f.sampleHeight(x + d, z) - f.sampleHeight(x - d, z)) / (2 * d);
+            const gz = (f.sampleHeight(x, z + d) - f.sampleHeight(x, z - d)) / (2 * d);
+            const grade = Math.hypot(gx, gz);
+            if (grade > best.grade) best = { x, z, grade };
+        }
+        app.mover.teleport(best.x, best.z);
+        app.mover.position.y = app.gait.groundAt(best.x, best.z);
+        app.gait.resync(app.mover);
+        app.wake.resync(app.mover);
+        app.rig.snap();
+        return { x: best.x, z: best.z, deg: (Math.atan(best.grade) * 180) / Math.PI };
+    }, Number(argv.get("steep")) || 300);
+    console.log(`steep start: ${found.deg.toFixed(1)} deg at ${found.x.toFixed(0)}, ${found.z.toFixed(0)}`);
+}
+
 // Optionally set fire to the ground first, for Phase 6's questions.
 if (argv.has("ignite")) {
     await page.evaluate((rate) => {
@@ -176,6 +205,20 @@ if (argv.has("ignite")) {
 // stride is phased on ground travelled, so it has to actually travel. Real key events
 // through the real Input class, because a gait driven by poking the mover would not be
 // exercising the path that ships.
+// Peak speed over the run, not the speed at the end of it. A slide down a face is over
+// by the time it reaches the bottom, and sampling there measures the flat ground it
+// stopped on rather than the hill it came down.
+await page
+    .evaluate(() => {
+        window.__peak = 0;
+        const tick = () => {
+            window.__peak = Math.max(window.__peak, window.__substrate.mover.speed);
+            window.__peakRaf = requestAnimationFrame(tick);
+        };
+        tick();
+    })
+    .catch(() => {});
+
 const walkMs = Number(argv.get("walk") ?? 0);
 // Optionally turn while walking, for Phase 8's questions — a wake only carves when the
 // path curves. Driven through the rig at a controlled rate rather than through lookX,
@@ -198,12 +241,14 @@ if (walkMs > 0) {
     const key = argv.get("walkKey") ?? "w";
     await page.keyboard.down(key);
     if (argv.get("sprint") === "true") await page.keyboard.down("Shift");
+    if (argv.get("slide") === "true") await page.keyboard.down("Control");
     await page.waitForTimeout(walkMs);
     // Held through the screenshot when asked, so the shot catches a foot mid-swing
     // rather than the settled stand the figure relaxes into a moment after stopping.
     if (argv.get("keepWalking") !== "true") {
         await page.keyboard.up(key);
         if (argv.get("sprint") === "true") await page.keyboard.up("Shift");
+        if (argv.get("slide") === "true") await page.keyboard.up("Control");
     }
 }
 
@@ -223,14 +268,14 @@ const adapter = await page
     })
     .catch((e) => `probe failed: ${e.message}`);
 
-const queue = await page.evaluate(() => ({ pending: window.__substrate.substrate.pending, dropped: window.__substrate.substrate.dropped })).catch(() => null);
+const queue = await page.evaluate(() => ({ pending: window.__substrate.substrate.pending, dropped: window.__substrate.substrate.dropped, speed: window.__substrate.mover.speed, peak: window.__peak ?? 0, sliding: window.__substrate.mover.sliding })).catch(() => null);
 
 await browser.close();
 
 console.log(`adapter: ${adapter}`);
 // A wake lays stamps far faster than a footfall does, and the queue drains one per
 // relaxation step — so a non-zero drop count is the channel coming out patchy.
-if (queue) console.log(`stamps:  ${queue.pending} pending, ${queue.dropped} dropped`);
+if (queue) console.log(`stamps:  ${queue.pending} pending, ${queue.dropped} dropped; peak speed ${queue.peak.toFixed(2)} m/s, final ${queue.speed.toFixed(2)}${queue.sliding ? " (sliding)" : ""}`);
 console.log(`booted:  ${booted}`);
 console.log(`shot:    ${out}`);
 console.log("--- console ---");

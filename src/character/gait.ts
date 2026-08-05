@@ -111,6 +111,8 @@ export class Gait {
     private _stand = 1;
     private _duty = DUTY_WALK;
     private _stride = 0.75;
+    /** 0 upright, 1 fully into the slide crouch. Damped, so dropping into it is a move. */
+    private _slide = 0;
     /** Hip height above the ankle this frame, metres. Shared by the pose and the cap. */
     private _hipHeight = LEG * 0.83;
     /** Integrated gait phase, in steps. Not derived from total distance — see update. */
@@ -248,7 +250,7 @@ export class Gait {
         // the character actually stands at licenses a stride the leg cannot make — and
         // the leg-reach clamp then drags the foot short of where the gait put it, which
         // on sloped ground reads as the foot sinking into the hill.
-        this._hipHeight = LEG * (0.97 - 0.14 * (1 - this._stand) - 0.04 * run);
+        this._hipHeight = LEG * (0.97 - 0.14 * (1 - this._stand) - 0.04 * run - 0.2 * this._slide);
         const reach = Math.sqrt(Math.max(LEG * LEG - this._hipHeight * this._hipHeight, 0)) * 0.95;
         // Stride follows from a cadence a human would actually use, and is then held to
         // what the legs can span. The slider still sets the walking stride; below the run
@@ -265,9 +267,14 @@ export class Gait {
         // Standing is a separate state, cross-faded in. The cycle is phased on distance,
         // so when the character stops, distance stops and the phase FREEZES — without
         // this, halting mid-stride would leave a foot hanging in the air forever.
-        const moving = mover.speed >= MOVING_SPEED;
+        // A SLIDING BODY IS NOT TAKING STEPS, so the walk cycle is switched off and the
+        // feet ride under the hips exactly as they do when standing. That suspends the
+        // no-sliding contract on purpose: the feet ARE sliding, which is the whole point,
+        // and pretending otherwise would plant them in ground that is moving past.
+        const moving = mover.speed >= MOVING_SPEED && !mover.sliding;
         const decay = dt > 0 ? 1 - Math.exp(-SETTLE_RATE * dt) : 0;
         this._stand += ((moving ? 0 : 1) - this._stand) * decay;
+        this._slide += ((mover.sliding ? 1 : 0) - this._slide) * (dt > 0 ? 1 - Math.exp(-7 * dt) : 0);
 
         // Turn rate, for the bank. Wrapped, because facing crosses pi every time the
         // character walks south.
