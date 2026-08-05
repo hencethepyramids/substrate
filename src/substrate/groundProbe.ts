@@ -177,6 +177,19 @@ export class GroundProbe {
         return (a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz;
     }
 
+    /**
+     * Loose mass at a world position — what the relaxation has broken up and not yet
+     * settled. The tile already carries it in its alpha channel, so this is free.
+     */
+    massAt(x: number, z: number): number {
+        const data = this._data;
+        if (data === null) return 0;
+        const fx = (x - this._dataOriginX) / this._dataTexel - 0.5;
+        const fz = (z - this._dataOriginZ) / this._dataTexel - 0.5;
+        if (fx < 0 || fz < 0 || fx > TILE - 1 || fz > TILE - 1) return 0;
+        return data[(Math.round(fz) * TILE + Math.round(fx)) * 4 + 3];
+    }
+
     dispose(): void {
         this._target?.dispose();
         this._target = null;

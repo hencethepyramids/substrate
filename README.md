@@ -77,7 +77,7 @@ between "builds" and "the driver will accept this".
 
 ---
 
-## Status: Phase 8 in progress
+## Status: Phase 8 complete
 
 | Phase | State |
 | --- | --- |
@@ -89,7 +89,7 @@ between "builds" and "the driver will accept this".
 | 5 — air | **done** |
 | 6 — fire | **done** |
 | 7 — character | **done** |
-| 8 — traversal and wakes | **passes A-C landed** |
+| 8 — traversal and wakes | **done** |
 | 9 — post | not started |
 | 10 — interactions | not started |
 | 11 — game layer | not started |

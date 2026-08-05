@@ -83,3 +83,6 @@ Pass E hung a cloth on the back, driven by the air field.
 - `phase8-slide-snow.png` — snow, sun 14, sliding off a 63 deg face found by
   `capture.mjs --steep`. The slide crouch, and the wake it carved running back up the
   slope behind. Speed here is gravity's, not the player's: sliding has no target speed.
+- `phase8-spray-snow.png` — snow, sun 16, sliding off a steep face. Thrown material, gated
+  on the substrate's loose-mass channel and lit by the same sun as the ground it came off.
+  Alpha blended rather than additive: a grain of snow hides what is behind it.

@@ -19,6 +19,7 @@ import { Substrate } from "./substrate/substrate";
 import { Carve } from "./substrate/carve";
 import { GroundProbe } from "./substrate/groundProbe";
 import { Wake } from "./substrate/wake";
+import { Spray } from "./substrate/spray";
 import { AirField } from "./air/airField";
 import { AirProbe } from "./air/airProbe";
 import { Airborne } from "./air/airborne";
@@ -74,6 +75,7 @@ async function boot(): Promise<void> {
     let groundProbe!: GroundProbe;
     let airProbe!: AirProbe;
     let cloak!: Cloak;
+    let spray!: Spray;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
 
@@ -122,6 +124,8 @@ async function boot(): Promise<void> {
         // the ground reads the air's debt, and each sees the other's previous step.
         substrate.setAirborne(airborne);
         embers = new Embers(scene, settings, biome, terrain.field, substrate, air, fire);
+        // Thrown material. Reads the substrate's loose mass, so it is built with it.
+        spray = new Spray(scene, settings, biome, terrain.field, substrate, air, sky);
         // The gait needs the CPU mirror of the heightfield to plant feet on, so it is
         // built with the terrain rather than with the mover. The figure needs the gait:
         // its geometry is authored against the rig, and its pose is the gait's palette.
@@ -163,6 +167,7 @@ async function boot(): Promise<void> {
         await fire.prepare();
         await airborne.prepare();
         await embers.prepare();
+        await spray.prepare();
     });
 
     // Rule 2: every pipeline compiled and drawn once behind the loading screen.
@@ -190,6 +195,7 @@ async function boot(): Promise<void> {
             airborne.update(1 / 60);
             fire.update(1 / 60);
             embers.update(rig.camera, 1 / 60);
+            spray.update(rig.camera, mover, 1 / 60);
             terrain.update(rig.camera);
             character.update(rig.camera);
             cloak.update(rig.camera, 1 / 60);
@@ -330,6 +336,8 @@ async function boot(): Promise<void> {
         // its phase up next frame.
         fire.update(simDt);
         embers.update(rig.camera, simDt);
+        // After the wake that made the loose mass it reads.
+        spray.update(rig.camera, mover, simDt);
         perf.end(S_SUBSTRATE);
 
         perf.begin(S_UNIFORMS);
@@ -366,11 +374,12 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake, spray };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
         overlay.dispose();
+        spray.dispose();
         embers.dispose();
         fire.dispose();
         airborne.dispose();

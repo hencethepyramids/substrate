@@ -268,14 +268,14 @@ const adapter = await page
     })
     .catch((e) => `probe failed: ${e.message}`);
 
-const queue = await page.evaluate(() => ({ pending: window.__substrate.substrate.pending, dropped: window.__substrate.substrate.dropped, speed: window.__substrate.mover.speed, peak: window.__peak ?? 0, sliding: window.__substrate.mover.sliding })).catch(() => null);
+const queue = await page.evaluate(() => ({ pending: window.__substrate.substrate.pending, dropped: window.__substrate.substrate.dropped, speed: window.__substrate.mover.speed, peak: window.__peak ?? 0, sliding: window.__substrate.mover.sliding, mass: window.__substrate.groundProbe.massAt(window.__substrate.mover.position.x, window.__substrate.mover.position.z) })).catch(() => null);
 
 await browser.close();
 
 console.log(`adapter: ${adapter}`);
 // A wake lays stamps far faster than a footfall does, and the queue drains one per
 // relaxation step — so a non-zero drop count is the channel coming out patchy.
-if (queue) console.log(`stamps:  ${queue.pending} pending, ${queue.dropped} dropped; peak speed ${queue.peak.toFixed(2)} m/s, final ${queue.speed.toFixed(2)}${queue.sliding ? " (sliding)" : ""}`);
+if (queue) console.log(`stamps:  ${queue.pending} pending, ${queue.dropped} dropped; peak speed ${queue.peak.toFixed(2)} m/s, final ${queue.speed.toFixed(2)}${queue.sliding ? " (sliding)" : ""}; loose mass under the feet ${queue.mass.toFixed(4)}`);
 console.log(`booted:  ${booted}`);
 console.log(`shot:    ${out}`);
 console.log("--- console ---");
