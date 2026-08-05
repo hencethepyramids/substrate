@@ -111,6 +111,8 @@ export class Gait {
     private _stand = 1;
     private _duty = DUTY_WALK;
     private _stride = 0.75;
+    /** 0 walking, 1 running, on the clock of absolute speed. Shared by the whole pose. */
+    private _run = 0;
     /** 0 upright, 1 fully into the slide crouch. Damped, so dropping into it is a move. */
     private _slide = 0;
     /** Hip height above the ankle this frame, metres. Shared by the pose and the cap. */
@@ -227,6 +229,7 @@ export class Gait {
         // A walk rolls through a long stance; a run spends most of the cycle airborne.
         // How far into running the character is, on the clock of absolute speed.
         const run = clamp01((mover.speed - RUN_FROM) / (RUN_TO - RUN_FROM));
+        this._run = run;
         const duty = DUTY_WALK + (DUTY_RUN - DUTY_WALK) * run;
         this._duty = duty;
 
@@ -542,16 +545,31 @@ export class Gait {
         // Counter-phased against the legs: the right arm is back at the moment the right
         // foot lands. That opposition is what stops a walk reading as a shuffle, and it
         // costs one sign.
-        const swing = s["char.armSwing"] * DEG * Math.min(0.5 + 0.5 * speedRatio, 1.8) * moving;
+        const swing = s["char.armSwing"] * DEG * (0.6 + 0.5 * this._run) * moving;
         const wave = Math.cos(Math.PI * stepPhase);
+        // THE FOREARM LAGS THE SHOULDER. An arm is not a rigid rod hinged at the top: the
+        // elbow trails what the shoulder is doing by a fraction of a beat, and that lag is
+        // most of what makes a swinging arm look loose rather than bolted on. An eighth of
+        // a step is small enough to read as slack and large enough to see.
+        const waveLag = Math.cos(Math.PI * (stepPhase - 0.16));
         // A hanging arm still has a slight bend; a running one has a lot.
-        const elbow = (12 + 34 * clamp01(speedRatio)) * DEG;
+        // ON ABSOLUTE SPEED, NOT ON THE RATIO TO A SLIDER CALLED "walk".
+        //
+        // This was 12 + 34 * clamp01(speedRatio), which is 46 degrees the moment the
+        // character reaches char.walkSpeed — and char.walkSpeed is 3.2 m/s, a jog. So a
+        // running arm carriage was applied at walking pace: the forearm sat 46 degrees
+        // forward of the upper arm at ALL times, which meant that however far the shoulder
+        // swung, the forearm never once came behind vertical. Every frame of the cycle had
+        // both arms held out in front, horizontally, like a sleepwalker. It is the single
+        // thing that made the walk look wrong, and no single screenshot showed it — it
+        // took a contact sheet of a whole cycle to see that the arms were not moving.
+        const elbow = (6 + 54 * this._run) * DEG;
         const neckX = sk.head[B.neck * 3];
         const neckY = sk.head[B.neck * 3 + 1];
         const neckZ = sk.head[B.neck * 3 + 2];
         const shoulderY = neckY - (P.neckY - P.shoulderY);
-        this._arm(B.upperArmR, B.foreArmR, B.handR, neckX + P.shoulderHalf, shoulderY, neckZ, -swing * wave, elbow);
-        this._arm(B.upperArmL, B.foreArmL, B.handL, neckX - P.shoulderHalf, shoulderY, neckZ, swing * wave, elbow);
+        this._arm(B.upperArmR, B.foreArmR, B.handR, neckX + P.shoulderHalf, shoulderY, neckZ, -swing * wave, elbow, -swing * waveLag);
+        this._arm(B.upperArmL, B.foreArmL, B.handL, neckX - P.shoulderHalf, shoulderY, neckZ, swing * wave, elbow, swing * waveLag);
 
         // --- cloak ----------------------------------------------------------
         // Rides the chest and hangs. Pass E gives it a solver and the wind that already
@@ -704,7 +722,7 @@ export class Gait {
     }
 
     /** Shoulder, elbow and hand from two angles. A round limb needs no IK to read. */
-    private _arm(upper: number, fore: number, hand: number, sx: number, sy: number, sz: number, angle: number, elbow: number): void {
+    private _arm(upper: number, fore: number, hand: number, sx: number, sy: number, sz: number, angle: number, elbow: number, lagged: number): void {
         const sk = this.skeleton;
         // Keep the outward splay the rest pose has and spend the swing on the other two
         // axes, so the arms stay clear of the ribs however far they travel.
@@ -716,7 +734,8 @@ export class Gait {
         sk.setHead(upper, sx, sy, sz);
         sk.setDir(upper, splay, uy, uz);
 
-        const fa = angle + elbow;
+        // The forearm is carried by where the shoulder WAS, plus the flexion.
+        const fa = lagged + elbow;
         const fy = -Math.cos(fa) * drop;
         const fz = Math.sin(fa) * drop;
         sk.setHead(fore, sx + splay * UPPER_ARM, sy + uy * UPPER_ARM, sz + uz * UPPER_ARM);

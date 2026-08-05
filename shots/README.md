@@ -86,3 +86,11 @@ Pass E hung a cloth on the back, driven by the air field.
 - `phase8-spray-snow.png` — snow, sun 16, sliding off a steep face. Thrown material, gated
   on the substrate's loose-mass channel and lit by the same sun as the ground it came off.
   Alpha blended rather than additive: a grain of snow hides what is behind it.
+
+## Gait contact sheets
+
+Made by `scripts/filmstrip.mjs`, which samples a whole cycle rather than one instant.
+Every animation defect this project has had was invisible in a single still.
+
+- `gait-walk-cycle.png` — 12 frames across one walk cycle, side on.
+- `gait-run-cycle.png` — 8 frames across one run cycle, with the spray trailing behind.

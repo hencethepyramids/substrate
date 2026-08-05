@@ -68,15 +68,25 @@ fn main(input: VertexInputs) -> FragmentInputs {
     let rnd = spHash3(index, floor(age));
     let t = fract(age);
 
-    // Born in a disc around the character, with sqrt on the radius so the area is covered
-    // evenly rather than crowding the middle.
+    // BORN BEHIND THE CHARACTER, NOT AROUND IT.
+    //
+    // A disc centred on the body puts grains in front of the face and on top of the head,
+    // and at a sprint the figure disappears inside its own cloud — which is exactly what
+    // it did. Material is thrown off the back of a track, so the disc is offset a full
+    // radius behind along the direction of travel and the front half is thrown away
+    // outright. What is left is a plume trailing the feet.
     let ang = rnd.x * 6.2831853;
     let rad = sqrt(rnd.y) * uniforms.spSource.w;
-    let birthXZ = uniforms.spSource.xy + vec2f(cos(ang), sin(ang)) * rad;
+    let local = vec2f(cos(ang), sin(ang)) * rad;
+    let travel = uniforms.spThrow.xy;
+    let behind = -travel * uniforms.spSource.w * 0.9;
+    let birthXZ = uniforms.spSource.xy + behind + local;
+    // Anything still ahead of the body is not spray, it is fog.
+    let trailing = step(dot(birthXZ - uniforms.spSource.xy, travel), -0.15);
 
     // Only where the ground is actually broken, and only while something is breaking it.
     let sub = sbSubstrateAt(birthXZ);
-    let alive = step(uniforms.spThrow.z, sub.mass) * step(uniforms.spThrow.w, uniforms.spSource.z);
+    let alive = step(uniforms.spThrow.z, sub.mass) * step(uniforms.spThrow.w, uniforms.spSource.z) * trailing;
 
     let groundY = sbSampleField(birthXZ).x - sub.depression;
 
@@ -106,7 +116,10 @@ fn main(input: VertexInputs) -> FragmentInputs {
 
     // Collapses to nothing once it has fallen back below the ground it came from.
     let landed = step(groundY, y);
-    let size = uniforms.spParams.w * (0.5 + 0.5 * rnd.z) * alive * landed;
+    // Wide size variation and a shrink as it flies. Uniform blobs read as foam; real
+    // thrown material is mostly fine with a few big clods in it.
+    let grain = 0.35 + 1.5 * rnd.x * rnd.x;
+    let size = uniforms.spParams.w * grain * (1.0 - 0.35 * t) * alive * landed;
 
     let world = vec3f(x, y, z) + (uniforms.spCamRight * cx + uniforms.spCamUp * cy) * size;
     // Thrown material is air like anything else at range: forty metres of it between the

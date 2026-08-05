@@ -265,10 +265,10 @@ export const SCHEMA = {
     // and packed ground does not.
     "spray.speedMin": num({ group: "Spray", label: "Starts at", def: 3.6, min: 0, max: 12, step: 0.1, unit: "m/s" }),
     "spray.massMin": num({ group: "Spray", label: "Loose mass floor", def: 0.0002, min: 0, max: 0.01, step: 0.0001, hint: "Below this the ground has nothing to throw. It is what tells a fresh track from a packed one." }),
-    "spray.radius": num({ group: "Spray", label: "Throw radius", def: 1.6, min: 0.2, max: 6, step: 0.1, unit: "m", hint: "How far from the body grains are picked up." }),
+    "spray.radius": num({ group: "Spray", label: "Throw radius", def: 1.0, min: 0.2, max: 6, step: 0.1, unit: "m", hint: "How far from the body grains are picked up." }),
     "spray.launch": num({ group: "Spray", label: "Launch speed", def: 3.4, min: 0, max: 14, step: 0.1, unit: "m/s" }),
     "spray.life": num({ group: "Spray", label: "Lifetime", def: 1.1, min: 0.1, max: 4, step: 0.05, unit: "s" }),
-    "spray.size": num({ group: "Spray", label: "Grain size", def: 0.05, min: 0.005, max: 0.3, step: 0.005, unit: "m" }),
+    "spray.size": num({ group: "Spray", label: "Grain size", def: 0.028, min: 0.005, max: 0.3, step: 0.005, unit: "m" }),
 
     // -- Cloth ---------------------------------------------------------------
     // The cloak, on the same wind that carves the dunes and carries the smoke.
