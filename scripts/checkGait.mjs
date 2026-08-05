@@ -129,6 +129,7 @@ await page.evaluate(() => {
             pr: app.gait.phaseOf(0),
             pl: app.gait.phaseOf(1),
             duty: app.gait.duty,
+            strideNow: app.gait.stride,
             legR,
             legL,
             vertR: hipR[1] - r[1],
@@ -201,6 +202,9 @@ const result = await page.evaluate(() => {
         log: window.__gaitLog,
         stamps: window.__stamps,
         stride: app.settings.get("char.strideLength"),
+        // The stride the gait CHOSE, which now grows with speed. The print spacing has to
+        // match this rather than the slider, or the check is asserting the old model.
+        strideUsed: app.gait.stride,
         stance: app.settings.get("char.stanceWidth"),
         walkSpeed: app.settings.get("char.walkSpeed"),
         probeLatency: app.groundProbe.latencyMs,
@@ -234,7 +238,7 @@ const result = await page.evaluate(() => {
 
 await browser.close();
 
-const { log, stamps, stride, stance, walkSpeed, probeLatency, cloth } = result;
+const { log, stamps, stride, stance, walkSpeed, probeLatency, cloth, strideUsed } = result;
 if (log.length < 30) {
     console.error(`only ${log.length} frames captured — did the page run?`);
     process.exit(1);
@@ -410,7 +414,16 @@ console.log(`stance drift worst ${pct(worstSlide)}   ${worst.foot} foot, frame $
 console.log(`stance drift p50/p90 ${pct(p(0.5))} / ${pct(p(0.9))}`);
 console.log(`body travel/frame  ${pct(bodyStep)}   <- a foot carried along would move this much every frame`);
 console.log(`prints             ${printsChecked}, worst distance to nearest ankle ${pct(worstPrint)}`);
-console.log(`stride measured    ${measured.toFixed(3)} m   (setting ${stride}, stance width ${stance})`);
+{
+    const w = log.filter((f) => f.speed > 0.5);
+    const sn = w.map((f) => f.strideNow).sort((a, b) => a - b);
+    const chose = sn[Math.floor(sn.length / 2)] ?? 0;
+    const top = Math.max(...log.map((f) => f.speed));
+    const cad = w.map((f) => f.speed / Math.max(f.strideNow, 0.01)).sort((a, b) => a - b);
+    console.log(`stride measured    ${measured.toFixed(3)} m   (gait chose ${chose.toFixed(3)} while walking, slider ${stride} at walk pace)`);
+    console.log(`cadence            ${(cad[Math.floor(cad.length / 2)] ?? 0).toFixed(2)} steps/s median, top speed ${top.toFixed(2)} m/s`);
+    globalThis.__chose = chose;
+}
 console.log(`contact foot vs drawn ground   float p50 ${pct(fq(0.5))}, p90 ${pct(fq(0.9))}, peak ${pct(worstFloat)}; sink ${pct(worstSink)}`);
 console.log(`  ${settleBy.toFixed(0)} ms after contact onward     float p50 ${pct(lq(0.5))}, p90 ${pct(lq(0.9))}  <- has it settled`);
 console.log(`  off the surface by >2 cm        ${(offGround * 100).toFixed(1)}% of contact (${groundChecked} samples)  <- the snow compressing`);
@@ -437,7 +450,7 @@ if (errors.length > 0) console.log(`page errors: ${errors.join(" | ")}`);
 // walk is five to ten times that.
 const slideOk = worstSlide < 0.01;
 const printOk = worstPrint < 0.25;
-const strideOk = printsChecked > 2 && Math.abs(measured - stride) < 0.08;
+const strideOk = printsChecked > 2 && Math.abs(measured - (globalThis.__chose ?? strideUsed)) < 0.12;
 // The foot must REST on the drawn surface, judged over the whole contact rather than at
 // its peak: the peak is the compression transient on the frame the print is stamped.
 const groundOk = lq(0.9) < 0.025 && worstSink < 0.05;

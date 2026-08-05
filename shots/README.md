@@ -71,3 +71,6 @@ Pass E hung a cloth on the back, driven by the air field.
   bend, the trailing leg reaches back into its own print, and the posture stays upright.
   Before this the legs were straight at 97% extension throughout and peaked at 111% —
   past full reach, where the IK clamps and the foot leaves the shin entirely.
+- `phase7-run-fixed.png` — snow, sun 26, sprinting after the cadence fix. Stride 1.39 m
+  rather than a fixed 0.75, arms counter-swinging, prints far apart. Before this the
+  figure took 10.2 steps a second at this speed.

@@ -41,7 +41,19 @@ const MAX_PLANTS = 4;
 
 /** Fraction of a foot's cycle spent on the ground, walking and running. */
 const DUTY_WALK = 0.62;
-const DUTY_RUN = 0.4;
+const DUTY_RUN = 0.32;
+
+/**
+ * Hip height while moving, as a fraction of leg length, and how fast stride grows.
+ *
+ * The hip figure has to match the one the pose actually uses, because the stride cap is
+ * derived from it — a cap computed against a taller hip than the character stands at
+ * would allow a stride the leg cannot reach, which is the locked-leg bug again by
+ * another route.
+ */
+
+/** Most of a human's extra speed is stride, not cadence. */
+const STRIDE_EXPONENT = 0.7;
 
 /** How fast the figure settles into a standing pose once it stops, per second. */
 const SETTLE_RATE = 9;
@@ -90,6 +102,12 @@ export class Gait {
     /** 0 walking, 1 standing. Damped, so stopping settles rather than snaps. */
     private _stand = 1;
     private _duty = DUTY_WALK;
+    private _stride = 0.75;
+    /** Hip height above the ankle this frame, metres. Shared by the pose and the cap. */
+    private _hipHeight = LEG * 0.83;
+    /** Integrated gait phase, in steps. Not derived from total distance — see update. */
+    private _stepPhase = 0;
+    private _distancePrev = 0;
     private _facingPrev = 0;
     /** Smoothed turn rate, rad/s. */
     private _turn = 0;
@@ -135,6 +153,11 @@ export class Gait {
         return this._phase[foot];
     }
 
+    /** The stride the gait is actually using, metres of ground per step. */
+    get stride(): number {
+        return this._stride;
+    }
+
     /** Fraction of the cycle spent on the ground at the current speed. */
     get duty(): number {
         return this._duty;
@@ -153,6 +176,8 @@ export class Gait {
     resync(mover: Mover): void {
         const stride = Math.max(this._settings.v["char.strideLength"], 0.05);
         const stepPhase = mover.distance / stride;
+        this._stepPhase = stepPhase;
+        this._distancePrev = mover.distance;
         const half = this._settings.v["char.stanceWidth"] * 0.5;
         const cos = Math.cos(mover.facing);
         const sin = Math.sin(mover.facing);
@@ -179,7 +204,6 @@ export class Gait {
         if (!this._seeded) this.resync(mover);
 
         const s = this._settings.v;
-        const stride = Math.max(s["char.strideLength"], 0.05);
         const walk = Math.max(s["char.walkSpeed"], 0.1);
         const speedRatio = mover.speed / walk;
 
@@ -191,8 +215,33 @@ export class Gait {
         this._sin = Math.sin(mover.facing);
 
         // A walk rolls through a long stance; a run spends most of the cycle airborne.
-        const duty = Math.min(Math.max(DUTY_WALK + (DUTY_RUN - DUTY_WALK) * clamp01(speedRatio - 1), 0.3), 0.75);
+        const duty = Math.min(Math.max(DUTY_WALK + (DUTY_RUN - DUTY_WALK) * clamp01(speedRatio - 1), 0.28), 0.75);
         this._duty = duty;
+
+        // STRIDE GROWS WITH SPEED, AND IS CAPPED BY THE LEGS.
+        //
+        // Holding it fixed is what made fast movement read as a frantic shuffle: cadence
+        // is speed over stride, so a fixed 0.75 m stride meant 4.3 steps per second at
+        // walking pace and 10.2 at a sprint, against about 3 for a real runner. No amount
+        // of knee bend fixes a figure taking ten steps a second.
+        //
+        // Most of a human's speed increase comes from a longer stride rather than a
+        // faster cadence, which is the 0.7 exponent — and the slider keeps its meaning as
+        // the stride at walking pace.
+        //
+        // THE CAP IS GEOMETRY, NOT TASTE. A foot is planted for `duty * 2 * stride` of
+        // ground and sits half that either side of the hip, so that half has to stay
+        // inside what the leg can span at walking hip height. Lowering the duty is
+        // precisely what buys a runner a longer stride, and this says so in one line.
+        // A RUNNER CROUCHES, and that is what buys the reach a long stride needs. The
+        // same figure feeds the pose below, because a cap derived from a taller hip than
+        // the character actually stands at licenses a stride the leg cannot make — and
+        // the leg-reach clamp then drags the foot short of where the gait put it, which
+        // on sloped ground reads as the foot sinking into the hill.
+        this._hipHeight = LEG * (0.97 - 0.14 * (1 - this._stand) - 0.07 * clamp01(speedRatio - 1));
+        const reach = Math.sqrt(Math.max(LEG * LEG - this._hipHeight * this._hipHeight, 0)) * 0.95;
+        const stride = Math.min(Math.max(s["char.strideLength"], 0.05) * Math.pow(Math.max(speedRatio, 0.15), STRIDE_EXPONENT), reach / duty);
+        this._stride = stride;
 
         // Standing is a separate state, cross-faded in. The cycle is phased on distance,
         // so when the character stops, distance stops and the phase FREEZES — without
@@ -210,7 +259,17 @@ export class Gait {
         const rate = dt > 1e-5 ? turned / dt : 0;
         this._turn += (rate - this._turn) * (dt > 0 ? 1 - Math.exp(-12 * dt) : 0);
 
-        const stepPhase = mover.distance / stride;
+        // THE PHASE ACCUMULATES; IT IS NOT DIVIDED OUT OF THE TOTAL.
+        //
+        //  was correct while the stride was a constant. It is not,
+        // now that the stride grows with speed: changing the divisor rewrites the whole
+        // history, so the phase jumps the moment the character accelerates and the gait
+        // skips or repeats a step. Integrating the ground travelled, divided by the stride
+        // IN FORCE AT THE TIME, keeps it continuous — and it is still phased on distance,
+        // which is the contract that matters.
+        this._stepPhase += Math.max(mover.distance - this._distancePrev, 0) / stride;
+        this._distancePrev = mover.distance;
+        const stepPhase = this._stepPhase;
         const half = s["char.stanceWidth"] * 0.5;
         const lift = s["char.stepLift"] * Math.min(0.6 + 0.4 * speedRatio, 2);
 
@@ -382,7 +441,7 @@ export class Gait {
         // Real walking carries the hip at about 0.88 of leg length rather than 0.97, and
         // that difference is the entire knee bend. Standing gets the tall pose back, and
         // the crossfade is the same `moving` the rest of the gait already uses.
-        const standY = P.ankle + LEG * (0.97 - 0.14 * moving);
+        const standY = P.ankle + this._hipHeight;
         const bob = drop * 0.5 * (1 + Math.cos(2 * Math.PI * stepPhase)) * moving;
 
         // Weight shifts onto whichever foot is in mid-stance: the right at half-integer
