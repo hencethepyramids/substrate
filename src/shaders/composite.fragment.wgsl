@@ -16,9 +16,35 @@ varying vUV: vec2f;
 var textureSamplerSampler: sampler;
 var textureSampler: texture_2d<f32>;
 
+/// The top of the bloom pyramid, at half resolution. Bound to the scene itself with a
+/// weight of zero when bloom is off, so there is one shader rather than two variants.
+var cpBloomSampler: sampler;
+var cpBloom: texture_2d<f32>;
+
+/// How much of the frame's light arrives scattered rather than focused.
+uniform cpBloomWeight: f32;
+
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
-    let scene = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+    var scene = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+
+    // MIXED, NOT ADDED, and the distinction is the whole physical claim. Bloom here is
+    // veiling glare: light that should have landed on one point of the sensor and instead
+    // scattered across it, in the atmosphere between the lens elements, in the eye's own
+    // vitreous humour. Scattering MOVES energy, it does not make any, so the scattered
+    // fraction has to come out of the focused image. Adding a blurred copy on top would
+    // brighten the whole frame, which is why an added bloom always needs a threshold to
+    // stop it washing everything out — and a threshold is a lie, because real glare has
+    // no cutoff. A snow field glares. This one is thresholdless and energy conserving.
+    //
+    // GATED BY THE SAME WEIGHT AS THE TONEMAP, for the same reason. A debug view showing
+    // roughness is not emitting light, so nothing about it scatters; smearing a blurred
+    // copy of it across itself would soften exactly the per-texel structure those views
+    // exist to show. The weight is the frame's own answer to "is this light", so both the
+    // curve and the glare ask it.
+    let bloom = textureSample(cpBloom, cpBloomSampler, input.vUV).rgb;
+    let glare = uniforms.cpBloomWeight * saturate(scene.a);
+    scene = vec4f(mix(scene.rgb, bloom, glare), scene.a);
 
     // ALPHA IS THE TRANSFORM WEIGHT, and it exists for the debug views. Most of them do
     // not emit light — `vec3f(roughness)` is a number between 0 and 1 that means "how

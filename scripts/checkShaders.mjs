@@ -325,7 +325,12 @@ for (const path of tsFiles) {
 
 /** Names TS actually sets, via a ShaderMaterial/ProceduralTexture setter. */
 const setInTs = new Set();
-for (const m of tsSource.matchAll(/\.set(?:Float|Floats|Int|Vector2|Vector3|Vector4|Color3|Color4|Matrix|Texture|Array3|Array4)\("(\w+)"/g)) setInTs.add(m[1]);
+// `setTextureFromPostProcess` and `...Output` are how a post process reaches a texture
+// belonging to another pass in the chain — the only way to wire a pyramid, since the
+// chain itself only ever hands you the pass immediately before. They bind a sampler as
+// surely as setTexture does, and the longer names have to come first in the alternation
+// or `Texture` matches and the rest of the name is left dangling against `\(`.
+for (const m of tsSource.matchAll(/\.set(?:TextureFromPostProcessOutput|TextureFromPostProcess|Float|Floats|Int|Vector2|Vector3|Vector4|Color3|Color4|Matrix|Texture|Array3|Array4)\("(\w+)"/g)) setInTs.add(m[1]);
 /** Names TS declares in a uniforms/samplers list. Literals only — good enough, and it is what the lists are. */
 const listedInTs = new Set();
 for (const m of tsSource.matchAll(/"(\w+)"/g)) listedInTs.add(m[1]);

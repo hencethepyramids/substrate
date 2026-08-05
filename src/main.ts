@@ -229,6 +229,9 @@ async function boot(): Promise<void> {
     loader.add("overlay", 1, () => {
         overlay = new Overlay({ root: stage, settings, perf, gpu, scene, input, biome, capability });
         overlay.addCounter("sky bakes", () => String(sky.bakes));
+        // What the chain actually costs, in fullscreen passes. The bloom pyramid is
+        // nine of them, which is worth being able to see next to the frame time.
+        overlay.addCounter("post passes", () => String(post.passes));
         overlay.addCounter("substrate steps", () => String(substrate.steps));
         // One stamp lands per step, so a queue that is not draining is real information.
         overlay.addCounter("carve queue", () => (substrate.dropped > 0 ? `${substrate.pending} (${substrate.dropped} dropped)` : String(substrate.pending)));
