@@ -245,6 +245,16 @@ export const SCHEMA = {
     "char.skinRoughness": num({ group: "Character", label: "Skin roughness", def: 0.44, min: 0.04, max: 1, step: 0.01, advanced: true }),
     "char.subsurface": num({ group: "Character", label: "Subsurface", def: 0.35, min: 0, max: 1, step: 0.01, advanced: true, hint: "Wrapped light through the surface, tinted the way blood tints it." }),
 
+    // -- Wake ----------------------------------------------------------------
+    // The channel a body ploughs at speed. The stamp is volume-neutral, so the berms
+    // either side are conservation rather than a second effect.
+    "wake.speedMin": num({ group: "Wake", label: "Starts at", def: 4.2, min: 0, max: 12, step: 0.1, unit: "m/s", hint: "Below this a body walks over the ground rather than through it." }),
+    "wake.speedFull": num({ group: "Wake", label: "Full at", def: 8, min: 1, max: 20, step: 0.5, unit: "m/s" }),
+    "wake.width": num({ group: "Wake", label: "Width", def: 0.5, min: 0.1, max: 2, step: 0.05, unit: "m" }),
+    "wake.depth": num({ group: "Wake", label: "Depth", def: 0.075, min: 0, max: 0.5, step: 0.005, unit: "m", hint: "Per stamp at full speed. What the ground then does with it is the element's business." }),
+    "wake.spacing": num({ group: "Wake", label: "Stamp spacing", def: 0.14, min: 0.04, max: 0.6, step: 0.01, unit: "m", advanced: true, hint: "Distance between stamps, not time — so the channel is the same at 60 fps and at 240." }),
+    "wake.bias": num({ group: "Wake", label: "Carve bias", def: 0.9, min: 0, max: 2, step: 0.05, advanced: true, hint: "How far the channel leans to the outside of a turn, as a share of its own width." }),
+
     // -- Cloth ---------------------------------------------------------------
     // The cloak, on the same wind that carves the dunes and carries the smoke.
     "cloth.drag": num({ group: "Cloth", label: "Wind drag", def: 1.6, min: 0, max: 20, step: 0.1, hint: "How hard the air pushes on the sheet. Applied along the surface normal, which is why cloth fills instead of being shoved." }),

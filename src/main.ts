@@ -18,6 +18,7 @@ import { Terrain } from "./terrain/terrain";
 import { Substrate } from "./substrate/substrate";
 import { Carve } from "./substrate/carve";
 import { GroundProbe } from "./substrate/groundProbe";
+import { Wake } from "./substrate/wake";
 import { AirField } from "./air/airField";
 import { AirProbe } from "./air/airProbe";
 import { Airborne } from "./air/airborne";
@@ -78,6 +79,7 @@ async function boot(): Promise<void> {
 
     const mover = new Mover(settings);
     const carve = new Carve(settings);
+    const wake = new Wake(settings);
     const air = new AirField(settings);
 
     loader.add("requesting device", 3, async () => {
@@ -224,7 +226,7 @@ async function boot(): Promise<void> {
         gpu.register("substrate", () => substrate.gpuTime);
         gpu.register("airborne", () => airborne.gpuTime);
         gpu.register("heat", () => fire.gpuTime);
-        registerActions(overlay, settings, mover, rig, substrate, gait, fire);
+        registerActions(overlay, settings, mover, rig, substrate, gait, wake, fire);
     });
 
     try {
@@ -309,6 +311,9 @@ async function boot(): Promise<void> {
         air.update(simDt);
         // Then the carve sources, then the step that consumes them.
         carve.update(input, mover, gait, substrate, simDt);
+        // After the footfalls, so a print and the channel it sits in queue in the order
+        // they were made.
+        wake.update(mover, substrate, simDt);
         substrate.update(rig.camera, simDt);
         // Straight after the step it reads, so the tile the gait picks up next frame is
         // the freshest one there is. The readback is asynchronous and self-throttling: it
@@ -359,7 +364,7 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
@@ -383,7 +388,7 @@ async function boot(): Promise<void> {
 }
 
 /** Overlay buttons. Phase 10's element interactions register here too. */
-function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, substrate: Substrate, gait: Gait, fire: Fire): void {
+function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, substrate: Substrate, gait: Gait, wake: Wake, fire: Fire): void {
     const teleport = (x: number, z: number): void => {
         mover.teleport(x, z);
         mover.position.y = gait.groundAt(x, z);
@@ -392,6 +397,7 @@ function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig
         // the character landed, at a random point in the cycle — and would spend that
         // cycle swinging a foot from eight hundred metres away.
         gait.resync(mover);
+        wake.resync(mover);
     };
     overlay.addAction("cycle biome", () => {
         const current = settings.get("world.biome") as BiomeId;

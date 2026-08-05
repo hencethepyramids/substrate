@@ -177,6 +177,23 @@ if (argv.has("ignite")) {
 // through the real Input class, because a gait driven by poking the mover would not be
 // exercising the path that ships.
 const walkMs = Number(argv.get("walk") ?? 0);
+// Optionally turn while walking, for Phase 8's questions — a wake only carves when the
+// path curves. Driven through the rig at a controlled rate rather than through lookX,
+// because the look path is gated on pointer lock that a headless run never gets.
+const turnRate = (Number(argv.get("turn") ?? 0) * Math.PI) / 180;
+if (turnRate !== 0) {
+    await page.evaluate((r) => {
+        const app = window.__substrate;
+        let last = performance.now();
+        const spin = () => {
+            const now = performance.now();
+            app.rig.yaw += r * ((now - last) / 1000);
+            last = now;
+            window.__spinRaf = requestAnimationFrame(spin);
+        };
+        spin();
+    }, turnRate);
+}
 if (walkMs > 0) {
     const key = argv.get("walkKey") ?? "w";
     await page.keyboard.down(key);
@@ -206,9 +223,14 @@ const adapter = await page
     })
     .catch((e) => `probe failed: ${e.message}`);
 
+const queue = await page.evaluate(() => ({ pending: window.__substrate.substrate.pending, dropped: window.__substrate.substrate.dropped })).catch(() => null);
+
 await browser.close();
 
 console.log(`adapter: ${adapter}`);
+// A wake lays stamps far faster than a footfall does, and the queue drains one per
+// relaxation step — so a non-zero drop count is the channel coming out patchy.
+if (queue) console.log(`stamps:  ${queue.pending} pending, ${queue.dropped} dropped`);
 console.log(`booted:  ${booted}`);
 console.log(`shot:    ${out}`);
 console.log("--- console ---");

@@ -74,3 +74,9 @@ Pass E hung a cloth on the back, driven by the air field.
 - `phase7-run-fixed.png` — snow, sun 26, sprinting after the cadence fix. Stride 1.39 m
   rather than a fixed 0.75, arms counter-swinging, prints far apart. Before this the
   figure took 10.2 steps a second at this speed.
+- `phase8-wake-snow.png` — snow, sun 14, sprinting through a 55 deg/s turn. The swept
+  wake: a carved channel with a berm raised along its outside edge. The berm is not
+  modelled — the substrate stamp is volume-neutral, so pushing material out of the
+  middle has to put it somewhere.
+- `phase8-wake-desert.png` — the same run in sand, which slumps its channel back toward
+  the angle of repose while snow holds the wall. Same code, different element block.
