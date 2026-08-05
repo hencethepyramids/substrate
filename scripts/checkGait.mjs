@@ -176,8 +176,13 @@ await page.evaluate(() => {
     const app = window.__substrate;
     window.__stamps = [];
     const inner = app.substrate.stamp.bind(app.substrate);
+    // ONLY THE FOOTFALLS. The wake stamps into the same buffer through the same call,
+    // every 14 cm above 4.2 m/s — so at a sprint this recorded 307 "prints" over 40 m and
+    // then measured the spacing of a wake trench against the gait's stride. The footfall
+    // is the one laid at char.footRadius; nothing else uses that radius.
+    const footR = app.settings.get("char.footRadius");
     app.substrate.stamp = (x, z, r, d) => {
-        window.__stamps.push({ x, z, r, d, t: performance.now() });
+        if (Math.abs(r - footR) < 1e-4) window.__stamps.push({ x, z, r, d, t: performance.now() });
         return inner(x, z, r, d);
     };
 });

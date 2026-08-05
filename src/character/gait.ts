@@ -3,6 +3,7 @@ import type { Mover } from "../core/mover";
 import type { Heightfield } from "../terrain/heightfield";
 import type { GroundProbe } from "../substrate/groundProbe";
 import { Skeleton, B, P, THIGH, SHIN, LEG, UPPER_ARM } from "./skeleton";
+import { legPoseAt, type LegPose } from "./gaitCurves";
 
 /**
  * The gait: a solved walk cycle, not an animation.
@@ -126,6 +127,8 @@ export class Gait {
     private _seeded = false;
     /** Wall clock for the idle. Simulation seconds, so a pause holds the pose. */
     private _clock = 0;
+    /** Scratch for the measured swing pose. Rule 1: frame() allocates nothing. */
+    private readonly _pose1: LegPose = { hip: 0, knee: 0 };
 
     // The body this frame, so the leg solve can bring a world-space ankle back into
     // character space without the mover being threaded through every call.
@@ -394,6 +397,29 @@ export class Gait {
                 ay = dt > 0 ? prev + (settled - prev) * (1 - Math.exp(-SINK_RATE * dt)) : settled;
             } else {
                 const u = (t - duty) / (1 - duty);
+                // THE SWING COMES FROM MEASURED KINEMATICS, NOT FROM AN ARC.
+                //
+                // Sliding the foot along a lerp with a sine lift on it is the obvious
+                // thing and it is why the leg looked swept rather than cycled: a real
+                // swing is a hip reaching and a knee tucking, and the ankle position is
+                // what falls OUT of those, not what drives them. So the hip and knee come
+                // from gaitCurves and the ankle is their forward kinematics.
+                //
+                // Blended to the real landing over the last third, because the plant is
+                // still the plant — the print has to be under the foot and the foot has
+                // to stop where the ground is. Authored where the look matters, IK where
+                // the contract does.
+                legPoseAt(t, this._run, this._pose1);
+                const hipY = P.ankle + this._hipHeight;
+                const kneeZ = Math.sin(this._pose1.hip) * THIGH;
+                const kneeY = hipY - Math.cos(this._pose1.hip) * THIGH;
+                const shinA = this._pose1.hip - this._pose1.knee;
+                const poseZ = kneeZ + Math.sin(shinA) * SHIN;
+                const poseY = kneeY - Math.cos(shinA) * SHIN;
+                const lat = half * side;
+                const poseWX = this._px + lat * this._cos + poseZ * this._sin;
+                const poseWZ = this._pz - lat * this._sin + poseZ * this._cos;
+                const poseWY = this._py + poseY;
                 // Where the body will be when this foot next touches down. Recomputed
                 // every frame, so a turn mid-swing steers the foot rather than leaving
                 // it committed to a landing the character is no longer walking towards.
@@ -401,10 +427,15 @@ export class Gait {
                 const tx = this._px + travelX * (remaining + lead) + this._cos * half * side;
                 const tz = this._pz + travelZ * (remaining + lead) - this._sin * half * side;
                 const ease = u * u * (3 - 2 * u);
-                ax = px + (tx - px) * ease;
-                az = pz + (tz - pz) * ease;
+                // Wide enough that a sprint can converge. At duty 0.20 the last third of
+                // swing is about thirty milliseconds, which is not long enough to travel
+                // from a 105-degree tuck to a foot on the ground — the print ended up
+                // somewhere the foot was not.
+                const land = smoothstep(0.3, 1.0, u);
                 const ty = this.groundAt(tx, tz) + P.ankle;
-                ay = py + (ty - py) * ease + Math.sin(Math.PI * u) * lift;
+                ax = poseWX + (px + (tx - px) * ease - poseWX) * land;
+                az = poseWZ + (pz + (tz - pz) * ease - poseWZ) * land;
+                ay = poseWY + (py + (ty - py) * ease + Math.sin(Math.PI * u) * lift - poseWY) * land;
                 // Never through a rise the swing happens to cross.
                 const here = this.groundAt(ax, az) + P.ankle;
                 if (ay < here) ay = here;
