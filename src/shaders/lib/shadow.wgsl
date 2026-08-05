@@ -91,8 +91,31 @@ fn shDiskTap(i: i32, count: i32, rotation: f32) -> vec2f {
     return vec2f(cos(theta), sin(theta)) * r;
 }
 
+/// Per-pixel rotation for the disk above.
+///
+/// AN INTEGER HASH, NOT `fract(sin(x) * 43758.5453)`, and the reason is worth the lines.
+/// That idiom is chaotic in the last bit of its input: multiplying by 43758 after a sine
+/// means two world positions a single float ULP apart get unrelated rotations. The value
+/// is fine as noise — it is a stochastic filter and any realisation is as good as any
+/// other — but it makes the FILTER'S OUTPUT a function of the compiler. Phase 9 pass A
+/// found this the hard way: moving the tonemap into a composite changed the terrain's
+/// pipeline, the interpolated world coordinate came back one ULP different, and a third
+/// of the frame moved by a level or two with no shading change behind it. Every remaining
+/// Phase 9 pass wants to prove "the picture did not change", and that proof is worthless
+/// if the shadow filter reshuffles whenever a shader is edited.
+///
+/// So the position is quantised to a 0.24 mm grid — far finer than a pixel at any
+/// distance the cascades cover, so the noise is still per-pixel — and then hashed with
+/// integer mixing, which has no last-bit sensitivity at all.
 fn shDither(p: vec3f) -> f32 {
-    return fract(sin(dot(p.xz, vec2f(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+    let q = vec2i(floor(p.xz * 4096.0));
+    // Parenthesised because WGSL refuses to guess: mixing `*` and `^` without them is a
+    // hard parse error, and one that no amount of TypeScript checking will ever see.
+    var h = (u32(q.x) * 0x9e3779b9u) ^ (u32(q.y) * 0x85ebca6bu);
+    h ^= h >> 15u;
+    h *= 0x2c1b3c6du;
+    h ^= h >> 12u;
+    return f32(h & 0xffffffu) * (6.2831853 / 16777216.0);
 }
 
 /// PCSS against one cascade. 1 = fully lit.
