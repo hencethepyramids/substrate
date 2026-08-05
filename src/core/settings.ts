@@ -232,7 +232,7 @@ export const SCHEMA = {
     "char.turnRate": num({ group: "Character", label: "Turn rate", def: 540, min: 90, max: 1440, step: 10, unit: "deg/s", advanced: true }),
     // The gait, and the footfalls it lays. Stride length is the one number both the legs
     // and the prints are phased on, which is why a print stays under the foot that made it.
-    "char.strideLength": num({ group: "Character", label: "Stride length", def: 0.75, min: 0.2, max: 2.5, step: 0.05, unit: "m", hint: "Ground between prints, and one step of the walk cycle. Phased on distance, not time, so it holds at any speed." }),
+    "char.strideLength": num({ group: "Character", label: "Stride scale", def: 0.75, min: 0.2, max: 2.5, step: 0.05, unit: "m", hint: "Scales the stride the gait derives from speed and leg length. 0.75 leaves it unchanged. Still phased on distance, not time." }),
     "char.stanceWidth": num({ group: "Character", label: "Stance width", def: 0.28, min: 0, max: 1, step: 0.01, unit: "m" }),
     "char.stepLift": num({ group: "Character", label: "Step lift", def: 0.13, min: 0, max: 0.6, step: 0.01, unit: "m", hint: "Ground clearance at mid-swing. A swinging foot never drops below the terrain regardless." }),
     "char.armSwing": num({ group: "Character", label: "Arm swing", def: 34, min: 0, max: 90, step: 1, unit: "deg", hint: "Counter-phased against the legs. Zero reads as a shuffle." }),

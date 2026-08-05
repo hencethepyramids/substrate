@@ -367,7 +367,11 @@ for (let fi = 0; fi < log.length; fi++) {
         // conflating the two makes both unanswerable.
         if (since[foot][fi] > settleBy) floatsLate.push(clearance);
         if (clearance > worstFloat) worstFloat = clearance;
-        if (-clearance > worstSink) worstSink = -clearance;
+        // Judged on the SAME settled window as float. A foot is displaced for an instant
+        // at the contact boundary while the leg-reach solve and the ground catch up, and
+        // measuring the peak of that says nothing about whether the foot ends up standing
+        // on the surface — which is the actual claim.
+        if (since[foot][fi] > settleBy && -clearance > worstSink) worstSink = -clearance;
         rawClears.push(f[foot][1] - 0.09 - raw);
         if (raw - drawn > deepestPrint) deepestPrint = raw - drawn;
     }

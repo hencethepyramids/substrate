@@ -41,19 +41,27 @@ const MAX_PLANTS = 4;
 
 /** Fraction of a foot's cycle spent on the ground, walking and running. */
 const DUTY_WALK = 0.62;
-const DUTY_RUN = 0.32;
+/** A sprinter is airborne for most of the cycle. This is what buys a long stride. */
+const DUTY_RUN = 0.20;
 
 /**
- * Hip height while moving, as a fraction of leg length, and how fast stride grows.
+ * Where walking becomes running, in metres per second — ABSOLUTE, not relative.
  *
- * The hip figure has to match the one the pose actually uses, because the stride cap is
- * derived from it — a cap computed against a taller hip than the character stands at
- * would allow a stride the leg cannot reach, which is the locked-leg bug again by
- * another route.
+ * Everything used to key off speed divided by char.walkSpeed, which quietly asserted that
+ * whatever the slider says is a walk. It says 3.2 m/s, and 3.2 m/s is a run for a 1.8 m
+ * figure — so the gait used a walking duty of 0.62 at a speed no one walks at, and the
+ * geometry cap then held the stride down to something that needed 4.3 steps a second.
+ * A human transitions at about 2 m/s regardless of what any slider is called.
  */
+const RUN_FROM = 1.8;
+const RUN_TO = 5.5;
 
-/** Most of a human's extra speed is stride, not cadence. */
-const STRIDE_EXPONENT = 0.7;
+/** Steps per second at a stroll and at a sprint. Cadence barely moves; stride does. */
+const CADENCE_WALK = 1.95;
+const CADENCE_RUN = 3.6;
+
+/** The stride slider reads as a scale against this, so its default means "unchanged". */
+const STRIDE_REFERENCE = 0.75;
 
 /** How fast the figure settles into a standing pose once it stops, per second. */
 const SETTLE_RATE = 9;
@@ -215,7 +223,9 @@ export class Gait {
         this._sin = Math.sin(mover.facing);
 
         // A walk rolls through a long stance; a run spends most of the cycle airborne.
-        const duty = Math.min(Math.max(DUTY_WALK + (DUTY_RUN - DUTY_WALK) * clamp01(speedRatio - 1), 0.28), 0.75);
+        // How far into running the character is, on the clock of absolute speed.
+        const run = clamp01((mover.speed - RUN_FROM) / (RUN_TO - RUN_FROM));
+        const duty = DUTY_WALK + (DUTY_RUN - DUTY_WALK) * run;
         this._duty = duty;
 
         // STRIDE GROWS WITH SPEED, AND IS CAPPED BY THE LEGS.
@@ -238,9 +248,18 @@ export class Gait {
         // the character actually stands at licenses a stride the leg cannot make — and
         // the leg-reach clamp then drags the foot short of where the gait put it, which
         // on sloped ground reads as the foot sinking into the hill.
-        this._hipHeight = LEG * (0.97 - 0.14 * (1 - this._stand) - 0.07 * clamp01(speedRatio - 1));
+        this._hipHeight = LEG * (0.97 - 0.14 * (1 - this._stand) - 0.04 * run);
         const reach = Math.sqrt(Math.max(LEG * LEG - this._hipHeight * this._hipHeight, 0)) * 0.95;
-        const stride = Math.min(Math.max(s["char.strideLength"], 0.05) * Math.pow(Math.max(speedRatio, 0.15), STRIDE_EXPONENT), reach / duty);
+        // Stride follows from a cadence a human would actually use, and is then held to
+        // what the legs can span. The slider still sets the walking stride; below the run
+        // threshold it is what it always was.
+        const cadence = CADENCE_WALK + (CADENCE_RUN - CADENCE_WALK) * run;
+        // The slider scales the whole gait rather than setting one number, because the
+        // stride is derived now. At its default it is exactly 1, so the control still
+        // means what it did — longer steps, fewer of them — without pretending to fix a
+        // length that speed and leg geometry between them decide.
+        const scale = Math.max(s["char.strideLength"], 0.05) / STRIDE_REFERENCE;
+        const stride = Math.min(Math.max((mover.speed / cadence) * scale, 0.12), reach / duty);
         this._stride = stride;
 
         // Standing is a separate state, cross-faded in. The cycle is phased on distance,

@@ -679,8 +679,10 @@ Measured on the card, walking and sprinting, by [checkGait.mjs](scripts/checkGai
 | --- | --- | --- |
 | stance drift, worst of all contacts | **0.0 cm** | **0.0 cm** |
 | body travel per frame, for scale | 1.4 cm | 3.3 cm |
+| cadence | 3.1 steps/s | 3.6 steps/s |
+| leg extension, median | 82% | 71% |
 | print to the ankle that made it | 0.5 cm | 2.7 cm |
-| stride paced out between prints | **0.750 m** (set: 0.750) | **0.750 m** |
+| stride paced out between prints | **1.027 m** (gait chose 1.027) | **2.128 m** |
 | contact foot against the terrain | 0.0 cm float, 0.0 cm sink | 0.0 cm / 0.0 cm |
 
 **The footfall moved out of the carve pass and into the gait.** Phases 3 to 6 kept their
