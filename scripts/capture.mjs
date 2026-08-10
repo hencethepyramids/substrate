@@ -209,6 +209,22 @@ if (argv.has("steep")) {
     console.log(`steep start: ${found.deg.toFixed(1)} deg at ${found.x.toFixed(0)}, ${found.z.toFixed(0)}`);
 }
 
+// Aim the camera, for Phase 9's questions. Light shafts only exist when the sun is on or
+// near the screen, so "does this effect work" is not answerable without being able to
+// point at the sky the sun is actually in. Degrees, applied before the settle so the rig
+// has arrived by the time the shot is taken.
+if (argv.has("yaw") || argv.has("pitch")) {
+    await page.evaluate(
+        ({ yaw, pitch }) => {
+            const app = window.__substrate;
+            if (yaw !== null) app.rig.yaw = (yaw * Math.PI) / 180;
+            if (pitch !== null) app.rig.pitch = (pitch * Math.PI) / 180;
+            app.rig.snap();
+        },
+        { yaw: argv.has("yaw") ? Number(argv.get("yaw")) : null, pitch: argv.has("pitch") ? Number(argv.get("pitch")) : null },
+    );
+}
+
 // Optionally set fire to the ground first, for Phase 6's questions.
 if (argv.has("ignite")) {
     await page.evaluate((rate) => {

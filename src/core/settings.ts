@@ -211,6 +211,7 @@ export const SCHEMA = {
     "post.grain": bool({ group: "Post", label: "Grain", def: true }),
     "post.vignette": bool({ group: "Post", label: "Vignette", def: true }),
     "post.bloomIntensity": num({ group: "Post", label: "Bloom intensity", def: 0.6, min: 0, max: 3, step: 0.01, advanced: true }),
+    "post.godrayIntensity": num({ group: "Post", label: "Light shaft intensity", def: 1, min: 0, max: 3, step: 0.01, advanced: true }),
     "post.grainAmount": num({ group: "Post", label: "Grain amount", def: 0.35, min: 0, max: 2, step: 0.01, advanced: true }),
     "post.vignetteAmount": num({ group: "Post", label: "Vignette amount", def: 0.4, min: 0, max: 2, step: 0.01, advanced: true }),
     "post.sharpenAmount": num({ group: "Post", label: "Sharpen amount", def: 0.35, min: 0, max: 1, step: 0.01, advanced: true }),

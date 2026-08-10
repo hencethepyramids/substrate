@@ -99,15 +99,16 @@ async function boot(): Promise<void> {
         gpu = new GpuTimings(engine, settings, capability.has("timestamp-query"));
         input = new Input(canvas);
         rig = new CameraRig(scene, settings);
-        // Before anything draws. The camera's first post process decides the format of
-        // the target the scene renders into, so the HDR buffer only exists if this does.
-        post = new Post(scene, settings, rig.camera);
     });
 
     loader.add("clipmap mesh", 2, () => {
         // Sky and shadows first: terrain and the character bind their textures at
         // construction. Shadows learns which meshes cast once those exist.
         sky = new Sky(scene, settings, biome);
+        // After the sky, which owns the sun direction the light shafts project, and before
+        // anything draws: the camera's first post process decides the format of the target
+        // the scene renders into, so the HDR buffer only exists if this does.
+        post = new Post(scene, settings, rig.camera, sky);
         shadows = new Shadows(scene, settings, sky);
         terrain = new Terrain(scene, settings, biome, sky, shadows);
         // Straight after the terrain and before anything draws: the terrain material

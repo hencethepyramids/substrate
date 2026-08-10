@@ -21,8 +21,17 @@ var textureSampler: texture_2d<f32>;
 var cpBloomSampler: sampler;
 var cpBloom: texture_2d<f32>;
 
+/// In-scattered sunlight along the view ray. Bound to the scene with a gain of zero when
+/// shafts are off, for the same reason as the bloom above.
+var cpShaftsSampler: sampler;
+var cpShafts: texture_2d<f32>;
+
 /// How much of the frame's light arrives scattered rather than focused.
 uniform cpBloomWeight: f32;
+
+/// Gain on the shaft buffer. Separate from the bloom weight because one redistributes
+/// energy and the other brings in light that was not in the frame at all.
+uniform cpShaftWeight: f32;
 
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
@@ -45,6 +54,14 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let bloom = textureSample(cpBloom, cpBloomSampler, input.vUV).rgb;
     let glare = uniforms.cpBloomWeight * saturate(scene.a);
     scene = vec4f(mix(scene.rgb, bloom, glare), scene.a);
+
+    // ADDED, because a shaft is light that was never in the frame: photons from the sun
+    // scattering off air somewhere along this view ray. It is new radiance, not
+    // redistributed radiance, and it arrives BEFORE the tonemap so a bright shaft rolls
+    // off on the same curve as a bright anything else. Gated by the same class weight —
+    // a debug view is not air and nothing scatters through it.
+    let shafts = textureSample(cpShafts, cpShaftsSampler, input.vUV).rgb;
+    scene = vec4f(scene.rgb + shafts * (uniforms.cpShaftWeight * saturate(scene.a)), scene.a);
 
     // ALPHA IS THE TRANSFORM WEIGHT, and it exists for the debug views. Most of them do
     // not emit light — `vec3f(roughness)` is a number between 0 and 1 that means "how

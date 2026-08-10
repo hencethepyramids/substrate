@@ -104,5 +104,12 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         rgb = color;
     }
 
-    fragmentOutputs.color = vec4f(rgb, 1.0);
+    // ALPHA IS A MATERIAL CLASS, not just the display-transform weight it started as.
+    // 0 is a raw quantity, 1 is surface radiance, and 2 — here — is sky: light arriving
+    // with nothing between it and the camera. The composite still reads it as a weight,
+    // because saturate() maps both 1 and 2 to one, and the light shafts read the 2 as the
+    // thing they need and cannot get any other way: which pixels the sun can actually be
+    // seen through. The alternative was a depth pre-pass over the whole clipmap for one
+    // bit of information.
+    fragmentOutputs.color = vec4f(rgb, 2.0);
 }

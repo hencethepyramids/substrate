@@ -22,8 +22,21 @@ uniform bmTexel: vec2f;
 /// 1 on the first level, 0 below it. See the Karis note in main.
 uniform bmKaris: f32;
 
+/// Ceiling on a tap, on the first level only; effectively infinite below it.
+///
+/// A CEILING IS NOT A THRESHOLD, and the difference is the whole reason this is
+/// defensible. A threshold discards everything BELOW a value, which is what breaks
+/// energy conservation and makes dim things refuse to glare — the thing this bloom
+/// deliberately does not do. A ceiling bounds the single brightest sample, and it is here
+/// because of one object: the sun disc is drawn as irradiance over a solid angle of
+/// 6.8e-5 sr, so it lands near 59,000 against a sky of order ten. Five downsamples turn
+/// that into one hot texel at 50x28, and a tent upsample of one hot texel magnified 32x
+/// is a soft SQUARE about ninety pixels across sitting over the sun. Which is exactly
+/// what shipped in pass B, unnoticed, because no capture had the sun on screen.
+uniform bmCeiling: f32;
+
 fn tap(uv: vec2f, dx: f32, dy: f32) -> vec3f {
-    return textureSample(textureSampler, textureSamplerSampler, uv + vec2f(dx, dy) * uniforms.bmTexel).rgb;
+    return min(textureSample(textureSampler, textureSamplerSampler, uv + vec2f(dx, dy) * uniforms.bmTexel).rgb, vec3f(uniforms.bmCeiling));
 }
 
 /// Karis's weight: the reciprocal of a colour's luminance, so a group of taps averages

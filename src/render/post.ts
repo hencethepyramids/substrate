@@ -6,9 +6,11 @@ import type { Scene } from "@babylonjs/core/scene";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Settings } from "../core/settings";
 import { TONEMAPS } from "../core/settings";
+import type { Sky } from "./sky";
 import composite from "../shaders/composite.fragment.wgsl?raw";
 import bloomDown from "../shaders/bloomDown.fragment.wgsl?raw";
 import bloomUp from "../shaders/bloomUp.fragment.wgsl?raw";
+import godrays from "../shaders/godrays.fragment.wgsl?raw";
 
 /**
  * The post chain.
@@ -37,7 +39,17 @@ import bloomUp from "../shaders/bloomUp.fragment.wgsl?raw";
  * gives the pass's INPUT and `...Output` gives its output, so the scene is reachable as
  * the input of the first downsample however long the chain in between grows.
  *
- * WHAT IS NOT HERE YET: shafts, DoF, SSR, heat distortion, TAA, sharpen, grain, vignette.
+ * PASS C — LIGHT SHAFTS. One more pass at half resolution, marching from each pixel
+ * toward the sun's screen position and accumulating only the taps that land on sky. The
+ * scene buffer's alpha carries that answer: pass A made it a display-transform weight,
+ * and it is now a material class — 0 raw quantity, 1 surface, 2 sky — which costs nothing
+ * and saves a depth pre-pass over the whole clipmap for one bit of information.
+ *
+ * Shafts ADD and bloom MIXES, and that is not a stylistic choice. Bloom is light already
+ * in the frame landing in the wrong place; a shaft is light that was never in the frame
+ * at all, scattering off air along the view ray. One redistributes, the other arrives.
+ *
+ * WHAT IS NOT HERE YET: DoF, SSR, heat distortion, TAA, sharpen, grain, vignette.
  */
 
 /**
@@ -54,6 +66,50 @@ const LEVELS = 5;
  */
 const SCATTER_AT_UNITY = 0.08;
 
+/**
+ * Shaft gain at `post.godrayIntensity` = 1. The pass already averages over its taps, so
+ * this is the fraction of the sky's own radiance that the air along a clear ray adds
+ * back — a hazy day, not a smoke machine.
+ */
+const SHAFT_AT_UNITY = 0.55;
+
+/** How far outside the frame the sun may go before its shafts have faded out, in screens. */
+const SHAFT_MARGIN = 0.75;
+
+/**
+ * How far along the ray to the sun the taps span, and how fast they attenuate.
+ *
+ * Density below 1 means the taps stop short of the sun rather than reaching it, which is
+ * what keeps a beam from collapsing into a hard star at the disc. The decay is per tap,
+ * so 0.97 over 60 taps leaves about 16% at the far end — a beam that fades along its
+ * length instead of ending.
+ */
+const SHAFT_DENSITY = 0.85;
+const SHAFT_DECAY = 0.97;
+
+/**
+ * Ceiling on a single shaft tap, in scene-referred units at exposure 0.
+ *
+ * The sky near a low sun runs to a few tens; the sun disc itself runs to about 59,000,
+ * because it is drawn as irradiance over a solid angle of 6.8e-5 sr. Both are correct.
+ * Only one of them can be integrated by sixty taps, so the other gets clipped — see the
+ * long note in godrays.fragment.wgsl. Sixty keeps every part of the sky intact and takes
+ * three orders of magnitude off the disc.
+ *
+ * Scaled by exposure at bind time, because the scene buffer has already been multiplied
+ * by it and a constant that ignores that would clip the whole sky at +4 EV.
+ */
+const SHAFT_CEILING = 60;
+
+/**
+ * Ceiling on a bloom tap, first level only, same units and same reason as SHAFT_CEILING —
+ * an unrepresentable delta function has to be bounded before a five-level pyramid tries
+ * to carry it. Higher than the shafts ceiling because the pyramid is a far better filter
+ * than sixty taps along a line, and because the sun SHOULD glare hardest of anything in
+ * the frame: 200 still leaves it an order of magnitude over the brightest sky.
+ */
+const BLOOM_CEILING = 200;
+
 export class Post {
     private readonly _settings: Settings;
     private readonly _scene: Scene;
@@ -61,7 +117,18 @@ export class Post {
     private readonly _camera: Camera;
     private readonly _down: PostProcess[] = [];
     private readonly _up: PostProcess[] = [];
+    private readonly _shafts: PostProcess;
+    private readonly _sky: Sky;
     private readonly _disposers: (() => void)[] = [];
+    /**
+     * Whichever pass currently runs first. Its input IS the frame as rendered, and that
+     * is the only handle anything downstream has on the untouched scene.
+     */
+    private _first!: PostProcess;
+    private _shaftsAttached = true;
+    private _sunU = 0.5;
+    private _sunV = 0.5;
+    private _facing = 0;
     // Both start true because construction attaches all of them; _sync() reconciles
     // against the settings on the last line of the constructor.
     private _attached = true;
@@ -70,18 +137,19 @@ export class Post {
 
     /** True once every pass in the chain has actually compiled. */
     get compiled(): boolean {
-        return this._composite.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
+        return this._composite.isReady() && this._shafts.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
     }
 
     /** Fullscreen passes currently in the chain. Cheap to read, and it is what costs. */
     get passes(): number {
-        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0);
+        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0) + (this._shaftsAttached ? 1 : 0);
     }
 
-    constructor(scene: Scene, settings: Settings, camera: Camera) {
+    constructor(scene: Scene, settings: Settings, camera: Camera, sky: Sky) {
         this._settings = settings;
         this._scene = scene;
         this._camera = camera;
+        this._sky = sky;
 
         // Babylon addresses shaders in its store by `<name>PixelShader`, and takes the
         // bare name in the constructor. Registered here rather than in lib/register.ts
@@ -89,6 +157,7 @@ export class Post {
         ShaderStore.ShadersStoreWGSL["substrateCompositePixelShader"] = composite;
         ShaderStore.ShadersStoreWGSL["substrateBloomDownPixelShader"] = bloomDown;
         ShaderStore.ShadersStoreWGSL["substrateBloomUpPixelShader"] = bloomUp;
+        ShaderStore.ShadersStoreWGSL["substrateGodraysPixelShader"] = godrays;
 
         const engine = scene.getEngine();
         // EVERY PASS TAKES THE CAMERA AT CONSTRUCTION, and they are constructed in chain
@@ -114,13 +183,16 @@ export class Post {
             const ratio = 1 / 2 ** (i + 1);
             const pass = new PostProcess(`substrateBloomDown${i}`, "substrateBloomDown", {
                 ...common,
-                uniforms: ["bmTexel", "bmKaris"],
+                uniforms: ["bmTexel", "bmKaris", "bmCeiling"],
                 size: ratio,
             });
             pass.onApply = (effect) => {
                 // The SOURCE texel, which for a downsample is twice this pass's own.
                 effect.setFloat2("bmTexel", 1 / Math.max(pass.width * 2, 1), 1 / Math.max(pass.height * 2, 1));
                 effect.setFloat("bmKaris", i === 0 ? 1 : 0);
+                // Only the top level clamps. Below it the fireflies are already gone and
+                // a second ceiling would just be losing light for no reason.
+                effect.setFloat("bmCeiling", i === 0 ? BLOOM_CEILING * 2 ** (this._settings.v["render.exposure"] as number) : 3.4e38);
             };
             this._down.push(pass);
         }
@@ -145,10 +217,30 @@ export class Post {
             this._up.push(pass);
         }
 
+        // Half resolution. A shaft is a low-frequency thing and 60 taps at full resolution
+        // would be the most expensive pass here by a wide margin — but quarter was too far:
+        // the gradient immediately beside the sun is the steepest in the frame, and
+        // magnifying it 4x showed bilinear blocks. The taps read the FULL-resolution scene
+        // at continuous coordinates either way, so the disc is found regardless.
+        this._shafts = new PostProcess("substrateGodrays", "substrateGodrays", {
+            ...common,
+            uniforms: ["gsSunUV", "gsParams", "gsTexel"],
+            size: 0.5,
+        });
+        // Always: this pass wants the scene, never the pass in front of it.
+        this._shafts.externalTextureSamplerBinding = true;
+        this._shafts.onApply = (effect) => {
+            this._updateSun();
+            effect.setTextureFromPostProcess("textureSampler", this._first);
+            effect.setFloat2("gsSunUV", this._sunU, this._sunV);
+            effect.setFloat2("gsTexel", 1 / Math.max(this._shafts.width, 1), 1 / Math.max(this._shafts.height, 1));
+            effect.setFloat4("gsParams", SHAFT_DENSITY, SHAFT_DECAY, SHAFT_CEILING * 2 ** (this._settings.v["render.exposure"] as number), this._facing);
+        };
+
         this._composite = new PostProcess("substrateComposite", "substrateComposite", {
             ...common,
-            uniforms: ["sbTonemapMode", "cpBloomWeight"],
-            samplers: ["cpBloom"],
+            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight"],
+            samplers: ["cpBloom", "cpShafts"],
             size: 1.0,
         });
         this._composite.onApply = (effect) => {
@@ -159,22 +251,28 @@ export class Post {
                 this._probe();
             }
             effect.setFloat("sbTonemapMode", Math.max(0, TONEMAPS.indexOf(this._settings.v["post.tonemap"] as (typeof TONEMAPS)[number])));
+            // THE SCENE IS ALWAYS THE FIRST PASS'S INPUT, whatever the first pass turns
+            // out to be. Babylon's automatic binding hands each pass the previous one's
+            // OUTPUT, which for the composite is the top of the bloom pyramid — the one
+            // texture it must not mistake for the frame. Naming it explicitly is the fix,
+            // and doing it through `_first` means the toggles can reorder the chain
+            // underneath without this line ever having to know.
+            effect.setTextureFromPostProcess("textureSampler", this._first);
             if (this._bloomAttached) {
-                // WITH BLOOM, THE CHAIN HANDS US THE WRONG TEXTURE. The pass before the
-                // composite is the top of the pyramid, so Babylon's automatic binding
-                // would make the bloom the scene. `externalTextureSamplerBinding` turns
-                // that off and both textures get named explicitly: the scene is the INPUT
-                // of the first downsample, which is the one texture in the chain that is
-                // still the frame as rendered.
-                effect.setTextureFromPostProcess("textureSampler", this._down[0]);
                 effect.setTextureFromPostProcessOutput("cpBloom", this._up[this._up.length - 1]);
                 effect.setFloat("cpBloomWeight", Math.min(SCATTER_AT_UNITY * (this._settings.v["post.bloomIntensity"] as number), 0.9));
             } else {
-                // Off: the composite is first in the chain, so the automatic binding is
-                // right. cpBloom still has to point somewhere legal, and a weight of zero
-                // means it never reaches the output.
-                effect.setTextureFromPostProcess("cpBloom", this._composite);
+                // Off, and the sampler still has to point somewhere legal. A gain of zero
+                // is what keeps it out of the picture.
+                effect.setTextureFromPostProcess("cpBloom", this._first);
                 effect.setFloat("cpBloomWeight", 0);
+            }
+            if (this._shaftsAttached) {
+                effect.setTextureFromPostProcessOutput("cpShafts", this._shafts);
+                effect.setFloat("cpShaftWeight", SHAFT_AT_UNITY * (this._settings.v["post.godrayIntensity"] as number));
+            } else {
+                effect.setTextureFromPostProcess("cpShafts", this._first);
+                effect.setFloat("cpShaftWeight", 0);
             }
         };
 
@@ -186,7 +284,39 @@ export class Post {
         // so the toggle answers "what does it cost" as well as "what does it look like".
         this._disposers.push(settings.on("sys.post", () => this._sync()));
         this._disposers.push(settings.on("post.bloom", () => this._sync()));
+        this._disposers.push(settings.on("post.godrays", () => this._sync()));
         this._sync();
+    }
+
+    /**
+     * Where the sun is on screen, and whether there is any point looking.
+     *
+     * The sun is at infinity, so it projects as a DIRECTION: the same transform as a
+     * point but without the translation row, and the perspective divide still applies.
+     * `w` carries the sign — negative means the sun is behind the camera, and marching
+     * toward a point behind you produces a beam pattern that is not merely wrong but
+     * inverted, converging on the antisolar point.
+     *
+     * Writes into `_sunUV` and `_facing`; allocates nothing (Rule 1).
+     */
+    private _updateSun(): void {
+        const m = this._camera.getTransformationMatrix().m;
+        const d = this._sky.sunDir;
+        const x = d.x * m[0] + d.y * m[4] + d.z * m[8];
+        const y = d.x * m[1] + d.y * m[5] + d.z * m[9];
+        const w = d.x * m[3] + d.y * m[7] + d.z * m[11];
+        if (w <= 1e-6) {
+            this._facing = 0;
+            return;
+        }
+        this._sunU = (x / w) * 0.5 + 0.5;
+        this._sunV = (y / w) * 0.5 + 0.5;
+        // A sun just outside the frame still throws shafts INTO it — the taps march
+        // toward an off-screen point perfectly well — so this fades over a margin rather
+        // than cutting at the edge. Past a screen's width away the taps are stepping
+        // through nothing but occluder and the whole pass is wasted work.
+        const outside = Math.max(Math.abs(this._sunU - 0.5) - 0.5, Math.abs(this._sunV - 0.5) - 0.5, 0);
+        this._facing = Math.max(0, 1 - outside / SHAFT_MARGIN);
     }
 
     /**
@@ -212,16 +342,22 @@ export class Post {
     private _sync(): void {
         const wantPost = this._settings.v["sys.post"] as boolean;
         const wantBloom = wantPost && (this._settings.v["post.bloom"] as boolean);
-        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached;
+        const wantShafts = wantPost && (this._settings.v["post.godrays"] as boolean);
+        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached || wantShafts !== this._shaftsAttached;
 
         if (changed) {
             for (const pass of this._down) this._camera.detachPostProcess(pass);
             for (const pass of this._up) this._camera.detachPostProcess(pass);
+            this._camera.detachPostProcess(this._shafts);
             this._camera.detachPostProcess(this._composite);
         }
 
         this._attached = wantPost;
         this._bloomAttached = wantBloom;
+        this._shaftsAttached = wantShafts;
+        // The one texture everything downstream needs a handle on. Order of preference is
+        // chain order, so this stays true as passes come and go.
+        this._first = wantBloom ? this._down[0] : wantShafts ? this._shafts : this._composite;
 
         // Unconditionally, even when the chain is unchanged: construction attaches
         // everything before this runs for the first time, so the very first call has
@@ -231,9 +367,13 @@ export class Post {
         // depth test, so it has nothing to clear and skipping it is free.
         for (const pass of this._down) pass.autoClear = false;
         for (const pass of this._up) pass.autoClear = false;
+        this._shafts.autoClear = false;
         this._composite.autoClear = false;
-        (wantBloom ? this._down[0] : this._composite).autoClear = true;
-        this._composite.externalTextureSamplerBinding = wantBloom;
+        this._first.autoClear = true;
+        // Always explicit now: the composite names the scene through `_first` in every
+        // configuration, so there is no arrangement of toggles where the chain's automatic
+        // binding is the one that happens to be right.
+        this._composite.externalTextureSamplerBinding = true;
 
         if (!wantPost || !changed) return;
 
@@ -241,6 +381,10 @@ export class Post {
             for (const pass of this._down) this._camera.attachPostProcess(pass);
             for (const pass of this._up) this._camera.attachPostProcess(pass);
         }
+        // After the pyramid and before the composite. Position in the chain is almost
+        // irrelevant to this pass — it reads the scene explicitly — but it must be
+        // somewhere, and here it is next to the thing that consumes it.
+        if (wantShafts) this._camera.attachPostProcess(this._shafts);
         this._camera.attachPostProcess(this._composite);
     }
 
@@ -280,6 +424,7 @@ export class Post {
         this._disposers.length = 0;
         for (const pass of this._down) pass.dispose();
         for (const pass of this._up) pass.dispose();
+        this._shafts.dispose();
         this._composite.dispose();
     }
 }
