@@ -58,6 +58,15 @@ fn sbSpecularDual(n: vec3f, v: vec3f, l: vec3f, roughness: f32, lobeMix: f32) ->
     return mix(broad, sharp, lobeMix);
 }
 
+/// How much smoother packed material is than the loose material it came from.
+///
+/// LIVES HERE, IN THE SHARED INCLUDE, and it did not start that way. It was a constant in
+/// terrain.fragment.wgsl until the reflection pass needed the same number: the reflection
+/// has to reconstruct the roughness the terrain shaded with, and two copies of a material
+/// property is precisely how a trail ends up reflecting somewhere other than where it
+/// catches its highlight. Rule 4.
+const SB_PACKED_SMOOTH: f32 = 0.6;
+
 /// How far a glint facet tilts off the surface normal, and how tight its flash is.
 const SB_GLINT_SPREAD: f32 = 0.38;
 const SB_GLINT_POWER: f32 = 420.0;

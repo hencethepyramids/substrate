@@ -49,10 +49,6 @@ const SB_SMOKE_TAPS: i32 = 6;
 /// Smoke is grey, not black: it scatters most of what hits it.
 const SB_SMOKE_ALBEDO: f32 = 0.7;
 
-/// Packed material is smoother than the loose material it was made from, so a print in
-/// snow catches a highlight the powder around it does not. One more thing the compaction
-/// channel earns without a new parameter.
-const SB_PACKED_SMOOTH: f32 = 0.6;
 
 const SB_DEBUG_NORMALS: f32 = 1.0;
 const SB_DEBUG_RINGS: f32 = 2.0;

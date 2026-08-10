@@ -213,6 +213,7 @@ export const SCHEMA = {
     "post.grain": bool({ group: "Post", label: "Grain", def: true }),
     "post.vignette": bool({ group: "Post", label: "Vignette", def: true }),
     "post.bloomIntensity": num({ group: "Post", label: "Bloom intensity", def: 0.6, min: 0, max: 3, step: 0.01, advanced: true }),
+    "post.ssrIntensity": num({ group: "Post", label: "Reflection intensity", def: 1, min: 0, max: 3, step: 0.05, advanced: true, hint: "Gain on the screen-space reflection. 1 is the physical Fresnel answer, which on snow is deliberately subtle — the effect lives on the packed trail, not on the open field." }),
     "post.dofAperture": num({ group: "Post", label: "Aperture (f-number)", def: 2.8, min: 1.2, max: 22, step: 0.1, advanced: true, hint: "Smaller is a wider lens and a shallower focus. The focal length comes from the field of view, so this is the only lens dial." }),
     "post.dofStrength": num({ group: "Post", label: "Defocus exaggeration", def: 6, min: 0, max: 20, step: 0.1, advanced: true, hint: "NOT physical. 1 is the real lens, which at this field of view defocuses the horizon by under a pixel. See the note in post.ts." }),
     "post.dofFocus": num({ group: "Post", label: "Focus distance", def: 0, min: 0, max: 200, step: 0.5, unit: "m", advanced: true, hint: "0 focuses on the character, which is what a camera operator would do." }),

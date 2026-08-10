@@ -160,6 +160,9 @@ async function boot(): Promise<void> {
         character.setDepthMaterial(depth.skinnedDepth);
         post.setDepth(depth);
         post.setHeat(fire, substrate);
+        // The element's roughness, so the reflection pass and the terrain agree about how
+        // smooth the packed trail is.
+        post.setSurface(terrain);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);

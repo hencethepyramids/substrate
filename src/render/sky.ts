@@ -67,6 +67,19 @@ const SUN_IRRADIANCE = 4.0;
  * linear radiance and the composite owns the curve, so there is now exactly one place
  * that could put them on different transfers, and it does not.
  */
+/**
+ * What a consumer of the sky has to be, which is less than a ShaderMaterial.
+ *
+ * Widened in pass I so the reflection pass can read the sky LUT: a post-process binds
+ * through an Effect, not a material, and the two share nothing but these two methods. The
+ * same shape as fire.ts's FireTarget and for the same reason — the sky should not have an
+ * opinion about what is doing the looking.
+ */
+export interface SkyTarget {
+    setTexture(name: string, texture: ProceduralTexture): unknown;
+    setVector3(name: string, value: Vector3): unknown;
+}
+
 export const SKY_UNIFORMS = ["sbSunDir"] as const;
 /** Samplers likewise. Bind them with `sky.bindTo(material)`. */
 export const SKY_SAMPLERS = ["sbSkyLut", "sbSkyData"] as const;
@@ -244,7 +257,7 @@ export class Sky {
     }
 
     /** Point a material's sky samplers at these textures. Call once, at construction. */
-    bindTo(material: ShaderMaterial): void {
+    bindTo(material: SkyTarget): void {
         material.setTexture("sbSkyLut", this.lut);
         material.setTexture("sbSkyData", this.data);
     }
@@ -371,7 +384,7 @@ export class Sky {
     }
 
     /** Push the uniforms every lit material shares. Call once per frame, per material. */
-    pushTo(material: ShaderMaterial): void {
+    pushTo(material: SkyTarget): void {
         material.setVector3("sbSunDir", this.sunDir);
     }
 

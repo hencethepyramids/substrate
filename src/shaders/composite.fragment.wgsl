@@ -50,6 +50,13 @@ var cpDepth: texture_2d<f32>;
 /// Non-zero shows the depth buffer instead of the frame.
 uniform cpShowDepth: f32;
 
+/// Screen-space reflections, at half resolution, with the Fresnel weight in alpha.
+var cpSsrSampler: sampler;
+var cpSsr: texture_2d<f32>;
+
+/// Non-zero when the reflection pass is in the chain.
+uniform cpSsr0: f32;
+
 /// The defocused image at half resolution, with its circle of confusion in alpha.
 var cpDofSampler: sampler;
 var cpDof: texture_2d<f32>;
@@ -145,6 +152,22 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // a debug view is not air and nothing scatters through it.
     let shafts = textureSample(cpShafts, cpShaftsSampler, uv).rgb;
     scene = vec4f(scene.rgb + shafts * (uniforms.cpShaftWeight * saturate(scene.a)), scene.a);
+
+    // REFLECTIONS, ADDED, AND ADDING IS THE CORRECT OPERATION HERE FOR ONCE. Everywhere
+    // else in this file the question "add or mix" has a real answer that took thought —
+    // bloom mixes because scattering moves energy, shafts add because they bring light that
+    // was not in the frame. This adds for a blunter reason: the renderer has no environment
+    // specular at all. The terrain's only specular is the sun's, so there is nothing here
+    // to double-count, and this is the missing half of the BRDF rather than a layer on top
+    // of a finished one.
+    //
+    // The weight in alpha is Fresnel times the roughness gate, computed where the surface
+    // normal was known. Gated by the class weight like everything else: a debug view is not
+    // a mirror.
+    if (uniforms.cpSsr0 > 0.0) {
+        let refl = textureSample(cpSsr, cpSsrSampler, uv);
+        scene = vec4f(scene.rgb + refl.rgb * (refl.a * saturate(scene.a)), scene.a);
+    }
 
     // VIGNETTE, BEFORE THE CURVE, BECAUSE IT IS A LENS AND NOT A LOOK. Less light reaches
     // the corner of a sensor than the centre, and the falloff is not an arbitrary radial

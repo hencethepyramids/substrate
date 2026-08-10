@@ -9,7 +9,8 @@ import type { Scene } from "@babylonjs/core/scene";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Settings } from "../core/settings";
 import { TONEMAPS } from "../core/settings";
-import type { Sky } from "./sky";
+import type { Sky, SkyTarget } from "./sky";
+import { SKY_SAMPLERS, SKY_UNIFORMS } from "./sky";
 import type { Depth } from "./depth";
 import type { FireTarget } from "../fire/fire";
 import type { SubstrateTarget } from "../substrate/substrate";
@@ -17,6 +18,16 @@ import type { SubstrateTarget } from "../substrate/substrate";
 /** What the composite needs from the fire, without Post having to know what a fire is. */
 export interface HeatSource {
     bindTo(target: FireTarget): void;
+}
+/**
+ * The one surface number the reflection pass cannot derive for itself.
+ *
+ * Only base roughness: how much compaction smooths it is a material fact shared by both
+ * shaders, so it lives in lib/brdf.wgsl as SB_PACKED_SMOOTH rather than being carried
+ * across the boundary twice.
+ */
+export interface SurfaceSource {
+    readonly baseRoughness: number;
 }
 /** Likewise the substrate window, which is where the heat field lives. */
 export interface HeatWindow {
@@ -28,6 +39,7 @@ import bloomDown from "../shaders/bloomDown.fragment.wgsl?raw";
 import bloomUp from "../shaders/bloomUp.fragment.wgsl?raw";
 import godrays from "../shaders/godrays.fragment.wgsl?raw";
 import dof from "../shaders/dof.fragment.wgsl?raw";
+import ssr from "../shaders/ssr.fragment.wgsl?raw";
 import taa from "../shaders/taa.fragment.wgsl?raw";
 import finish from "../shaders/finish.fragment.wgsl?raw";
 
@@ -210,6 +222,7 @@ export class Post {
     private readonly _finish: PostProcess;
     private readonly _dof: PostProcess;
     private readonly _taa: PostProcess;
+    private readonly _ssr: PostProcess;
     /** Last frame's resolved output. Owned here, filled by a blit — see _store(). */
     private _history: RenderTargetTexture;
     private readonly _copy: CopyTextureToTexture;
@@ -218,6 +231,7 @@ export class Post {
     private readonly _sky: Sky;
     private _depth: Depth | null = null;
     private _fire: HeatSource | null = null;
+    private _surface: SurfaceSource | null = null;
     private _window: HeatWindow | null = null;
     private readonly _disposers: (() => void)[] = [];
     /**
@@ -252,17 +266,18 @@ export class Post {
     private _attached = true;
     private _bloomAttached = true;
     private _taaAttached = true;
+    private _ssrAttached = true;
     private _probed = false;
     private _jitterProbed = false;
 
     /** True once every pass in the chain has actually compiled. */
     get compiled(): boolean {
-        return this._composite.isReady() && this._shafts.isReady() && this._finish.isReady() && this._dof.isReady() && this._taa.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
+        return this._composite.isReady() && this._shafts.isReady() && this._finish.isReady() && this._dof.isReady() && this._taa.isReady() && this._ssr.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
     }
 
     /** Fullscreen passes currently in the chain. Cheap to read, and it is what costs. */
     get passes(): number {
-        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0) + (this._shaftsAttached ? 1 : 0) + (this._finishAttached ? 1 : 0) + (this._dofAttached ? 1 : 0) + (this._taaAttached ? 1 : 0);
+        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0) + (this._shaftsAttached ? 1 : 0) + (this._finishAttached ? 1 : 0) + (this._dofAttached ? 1 : 0) + (this._taaAttached ? 1 : 0) + (this._ssrAttached ? 1 : 0);
     }
 
     constructor(scene: Scene, settings: Settings, camera: Camera, sky: Sky) {
@@ -280,6 +295,7 @@ export class Post {
         ShaderStore.ShadersStoreWGSL["substrateGodraysPixelShader"] = godrays;
         ShaderStore.ShadersStoreWGSL["substrateFinishPixelShader"] = finish;
         ShaderStore.ShadersStoreWGSL["substrateDofPixelShader"] = dof;
+        ShaderStore.ShadersStoreWGSL["substrateSsrPixelShader"] = ssr;
         ShaderStore.ShadersStoreWGSL["substrateTaaPixelShader"] = taa;
 
         const engine = scene.getEngine();
@@ -399,10 +415,46 @@ export class Post {
             effect.setFloat("dfCeiling", BLOOM_CEILING * 2 ** (this._settings.v["render.exposure"] as number));
         };
 
+        // Half resolution. A reflection off a rough surface has no detail finer than this
+        // to lose, and the march is the most expensive loop in the chain — 32 steps with a
+        // projection each, over every pixel that passes the Fresnel gate.
+        this._ssr = new PostProcess("substrateSsr", "substrateSsr", {
+            ...common,
+            uniforms: ["srCamPos", "srCamRight", "srCamUp", "srCamFwd", "srViewProj", "srLens", "srTexel", "srParams", "sbSubOrigin", "sbSubExtent", "sbSubSize", "sbSubFade", ...SKY_UNIFORMS],
+            samplers: ["srDepth", "sbSubTex", ...SKY_SAMPLERS],
+            size: 0.5,
+        });
+        this._ssr.externalTextureSamplerBinding = true;
+        this._ssr.onApply = (effect) => {
+            effect.setTextureFromPostProcess("textureSampler", this._first);
+            if (this._depth !== null) effect.setTexture("srDepth", this._depth.target);
+            const wm = this._camera.getWorldMatrix().m;
+            effect.setFloat3("srCamRight", wm[0], wm[1], wm[2]);
+            effect.setFloat3("srCamUp", wm[4], wm[5], wm[6]);
+            effect.setFloat3("srCamFwd", wm[8], wm[9], wm[10]);
+            const cp = this._camera.globalPosition;
+            effect.setFloat3("srCamPos", cp.x, cp.y, cp.z);
+            effect.setMatrix("srViewProj", this._camera.getTransformationMatrix());
+            effect.setFloat2("srLens", Math.tan(this._camera.fov * 0.5), this._ssr.aspectRatio);
+            effect.setFloat2("srTexel", 1 / Math.max(this._ssr.width, 1), 1 / Math.max(this._ssr.height, 1));
+            // The element's own roughness and the terrain's own compaction constant, so
+            // this pass reaches the same number terrain.fragment.wgsl reaches. Read through
+            // a getter rather than duplicated as a constant here, because two copies of a
+            // material property is how the trail ends up reflecting somewhere other than
+            // where it shines.
+            effect.setFloat4("srParams", this._surface !== null ? this._surface.baseRoughness : 0.5, this._settings.v["post.ssrIntensity"] as number, this._frame, 0);
+            this._sky.bindTo(effect as unknown as SkyTarget);
+            this._sky.pushTo(effect as unknown as SkyTarget);
+            if (this._window !== null) {
+                this._window.pushTo(effect);
+                this._window.bindTo(effect);
+            }
+        };
+
         this._composite = new PostProcess("substrateComposite", "substrateComposite", {
             ...common,
-            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight", "cpVignette", "cpShowDepth", "cpDofMax", "cpCamPos", "cpCamRight", "cpCamUp", "cpCamFwd", "cpHeat", "sbSubOrigin", "sbSubExtent", "sbSubSize", "sbSubFade"],
-            samplers: ["cpBloom", "cpShafts", "cpDepth", "cpDof", "sbFireTex", "sbSubTex"],
+            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight", "cpVignette", "cpShowDepth", "cpDofMax", "cpSsr0", "cpCamPos", "cpCamRight", "cpCamUp", "cpCamFwd", "cpHeat", "sbSubOrigin", "sbSubExtent", "sbSubSize", "sbSubFade"],
+            samplers: ["cpBloom", "cpShafts", "cpDepth", "cpDof", "cpSsr", "sbFireTex", "sbSubTex"],
             size: 1.0,
         });
         // AFTER the composite, so the colour arriving is display-referred and inside 0..1.
@@ -516,6 +568,13 @@ export class Post {
                 // whichever half is currently being written.
                 this._window.bindTo(effect);
             }
+            if (this._ssrAttached) {
+                effect.setTextureFromPostProcessOutput("cpSsr", this._ssr);
+                effect.setFloat("cpSsr0", 1);
+            } else {
+                effect.setTextureFromPostProcess("cpSsr", this._first);
+                effect.setFloat("cpSsr0", 0);
+            }
             if (this._dofAttached) {
                 effect.setTextureFromPostProcessOutput("cpDof", this._dof);
                 effect.setFloat("cpDofMax", DOF_MAX_COC);
@@ -561,6 +620,7 @@ export class Post {
         this._disposers.push(settings.on("post.grain", () => this._sync()));
         this._disposers.push(settings.on("post.dof", () => this._sync()));
         this._disposers.push(settings.on("post.taa", () => this._sync()));
+        this._disposers.push(settings.on("post.ssr", () => this._sync()));
         // The frame's last word: this frame's resolve becomes next frame's history.
         const stored = scene.onAfterRenderObservable.add(() => this._store());
         this._disposers.push(() => scene.onAfterRenderObservable.remove(stored));
@@ -627,6 +687,8 @@ export class Post {
         // without reprojection is what Babylon's own implementation is: fine for a still
         // photograph, a smear the moment anything moves. Off is better than that.
         const wantTaa = wantPost && (this._settings.v["post.taa"] as boolean) && this._depth !== null && this._depth.enabled;
+        // Depth again, for the same reason: the march IS a walk through the depth buffer.
+        const wantSsr = wantPost && (this._settings.v["post.ssr"] as boolean) && this._depth !== null && this._depth.enabled;
         // One pass for two toggles: either of them needs it, neither of them means it is
         // pure cost. The amounts still gate the work inside the shader.
         // TAA is the third reason to run it, and not because it wants sharpening: the
@@ -634,7 +696,7 @@ export class Post {
         // something comes after it. With both toggles off this is a passthrough, which is
         // the same fullscreen blit the copy needed anyway.
         const wantFinish = wantPost && (wantTaa || (this._settings.v["post.sharpen"] as boolean) || (this._settings.v["post.grain"] as boolean));
-        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached || wantShafts !== this._shaftsAttached || wantFinish !== this._finishAttached || wantDof !== this._dofAttached || wantTaa !== this._taaAttached;
+        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached || wantShafts !== this._shaftsAttached || wantFinish !== this._finishAttached || wantDof !== this._dofAttached || wantTaa !== this._taaAttached || wantSsr !== this._ssrAttached;
 
         if (changed) {
             for (const pass of this._down) this._camera.detachPostProcess(pass);
@@ -643,6 +705,7 @@ export class Post {
             this._camera.detachPostProcess(this._finish);
             this._camera.detachPostProcess(this._dof);
             this._camera.detachPostProcess(this._taa);
+            this._camera.detachPostProcess(this._ssr);
             this._camera.detachPostProcess(this._composite);
         }
 
@@ -654,9 +717,10 @@ export class Post {
         // Coming on means the history is a texture full of an old frame, or of nothing.
         if (wantTaa && !this._taaAttached) this._taaReset = true;
         this._taaAttached = wantTaa;
+        this._ssrAttached = wantSsr;
         // The one texture everything downstream needs a handle on. Order of preference is
         // chain order, so this stays true as passes come and go.
-        this._first = wantBloom ? this._down[0] : wantShafts ? this._shafts : wantDof ? this._dof : this._composite;
+        this._first = wantBloom ? this._down[0] : wantShafts ? this._shafts : wantDof ? this._dof : wantSsr ? this._ssr : this._composite;
 
         // Unconditionally, even when the chain is unchanged: construction attaches
         // everything before this runs for the first time, so the very first call has
@@ -670,6 +734,7 @@ export class Post {
         this._finish.autoClear = false;
         this._dof.autoClear = false;
         this._taa.autoClear = false;
+        this._ssr.autoClear = false;
         this._composite.autoClear = false;
         this._first.autoClear = true;
         // Always explicit now: the composite names the scene through `_first` in every
@@ -688,6 +753,7 @@ export class Post {
         // somewhere, and here it is next to the thing that consumes it.
         if (wantShafts) this._camera.attachPostProcess(this._shafts);
         if (wantDof) this._camera.attachPostProcess(this._dof);
+        if (wantSsr) this._camera.attachPostProcess(this._ssr);
         this._camera.attachPostProcess(this._composite);
         if (wantTaa) this._camera.attachPostProcess(this._taa);
         if (wantFinish) this._camera.attachPostProcess(this._finish);
@@ -701,6 +767,17 @@ export class Post {
      * one texture and four numbers, and nothing about this pass should have an opinion on
      * combustion.
      */
+    /**
+     * The element's surface constants, for the reflection pass.
+     *
+     * Narrow on purpose, like HeatSource: the reflection needs two numbers to reconstruct
+     * the roughness the terrain computed, and nothing here should have to know what an
+     * element registry is.
+     */
+    setSurface(surface: SurfaceSource): void {
+        this._surface = surface;
+    }
+
     setHeat(fire: HeatSource, window: HeatWindow): void {
         this._fire = fire;
         this._window = window;
@@ -917,6 +994,7 @@ export class Post {
         this._finish.dispose();
         this._dof.dispose();
         this._taa.dispose();
+        this._ssr.dispose();
         this._history.dispose();
         this._copy.dispose();
         this._composite.dispose();

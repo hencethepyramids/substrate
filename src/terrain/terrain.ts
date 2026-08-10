@@ -45,6 +45,8 @@ export class Terrain {
     private readonly _fieldOrigin = new Vector2(0, 0);
     private readonly _params = new Vector4(0, 0, 0, 0);
     private readonly _surface = new Vector4(0, 0, 0, 0);
+    /** The current element's base roughness, for anything outside that has to agree. */
+    baseRoughness = 0.5;
     private readonly _grain = new Vector4(0, 0, 0, 0);
     private readonly _pool = new Vector3(0, 0, 0);
     private readonly _smoke = new Vector2(0, 0);
@@ -206,6 +208,10 @@ export class Terrain {
 
         const surf = this._element.surface;
         this._surface.set(s["sys.substrate"] ? s["substrate.relief"] : 0, surf.baseRoughness, surf.subsurfaceStrength, surf.dualLobeMix);
+        // The reflection pass reconstructs the terrain's roughness from this and the
+        // substrate's compaction, so it has to be the SAME number, taken from the same
+        // element, on the same frame.
+        this.baseRoughness = surf.baseRoughness;
         m.setVector4("fSurface", this._surface);
         m.setColor3("fSubsurfaceTint", this._subsurfaceTint);
         this._grain.set(surf.glintDensity, surf.glintBasis, s["surface.glintStrength"], surf.emissiveGain);
