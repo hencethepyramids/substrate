@@ -33,6 +33,10 @@ uniform cpBloomWeight: f32;
 /// energy and the other brings in light that was not in the frame at all.
 uniform cpShaftWeight: f32;
 
+/// x: vignette amount, 0 off and 1 the physical falloff. y: tan of half the vertical
+/// field of view. z: aspect ratio.
+uniform cpVignette: vec3f;
+
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
     var scene = textureSample(textureSampler, textureSamplerSampler, input.vUV);
@@ -73,6 +77,26 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // showing a raw quantity writes 0 and arrives at the backbuffer untouched. Saturated
     // because additive blending pushes alpha past 1 and an unclamped mix would then
     // extrapolate past the tonemapped colour instead of landing on it.
+    // VIGNETTE, BEFORE THE CURVE, BECAUSE IT IS A LENS AND NOT A LOOK. Less light reaches
+    // the corner of a sensor than the centre, and the falloff is not an arbitrary radial
+    // gradient — it is cos^4 of the angle off the optical axis, which for a pinhole is
+    // exactly 1/(1+tan^2)^2. Deriving it from the actual field of view rather than from a
+    // radius in UV means it does the right thing on its own: widen the lens and the
+    // corners darken more, because they are further off-axis. A UV-radius vignette would
+    // look identical at every focal length, which no lens does.
+    //
+    // Being before the tonemap is what makes it behave: darkening radiance pulls a corner
+    // back down the curve, so a blown highlight in the corner rolls off into colour
+    // instead of staying flat white and getting greyer. Applied after the transform it
+    // would just be a grey wash.
+    if (uniforms.cpVignette.x > 0.0) {
+        let ndc = input.vUV * 2.0 - vec2f(1.0);
+        // Position on the sensor in units of focal length.
+        let sensor = vec2f(ndc.x * uniforms.cpVignette.y * uniforms.cpVignette.z, ndc.y * uniforms.cpVignette.y);
+        let cos2 = 1.0 / (1.0 + dot(sensor, sensor));
+        scene = vec4f(scene.rgb * mix(1.0, cos2 * cos2, uniforms.cpVignette.x), scene.a);
+    }
+
     let mapped = sbDisplay(scene.rgb);
     fragmentOutputs.color = vec4f(mix(scene.rgb, mapped, saturate(scene.a)), 1.0);
 }

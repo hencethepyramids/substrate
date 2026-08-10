@@ -11,6 +11,7 @@ import composite from "../shaders/composite.fragment.wgsl?raw";
 import bloomDown from "../shaders/bloomDown.fragment.wgsl?raw";
 import bloomUp from "../shaders/bloomUp.fragment.wgsl?raw";
 import godrays from "../shaders/godrays.fragment.wgsl?raw";
+import finish from "../shaders/finish.fragment.wgsl?raw";
 
 /**
  * The post chain.
@@ -49,7 +50,15 @@ import godrays from "../shaders/godrays.fragment.wgsl?raw";
  * in the frame landing in the wrong place; a shaft is light that was never in the frame
  * at all, scattering off air along the view ray. One redistributes, the other arrives.
  *
- * WHAT IS NOT HERE YET: DoF, SSR, heat distortion, TAA, sharpen, grain, vignette.
+ * PASS D — SORTED BY WHERE THEY PHYSICALLY HAPPEN. The vignette is a LENS: less light
+ * reaches the corner of the sensor, so it scales radiance and belongs in the composite,
+ * before the curve. Sharpening and grain are SENSOR AND OUTPUT effects and belong after
+ * it, in a final 8-bit pass — display-referred colour in 0..1 needs no more than that.
+ * Filing them by convenience instead would have put all three in one place and made two
+ * of them wrong.
+ *
+ * WHAT IS NOT HERE YET: DoF, SSR, heat distortion, TAA. The first two want real depth,
+ * which is the point where a depth buffer has to earn its cost.
  */
 
 /**
@@ -118,6 +127,7 @@ export class Post {
     private readonly _down: PostProcess[] = [];
     private readonly _up: PostProcess[] = [];
     private readonly _shafts: PostProcess;
+    private readonly _finish: PostProcess;
     private readonly _sky: Sky;
     private readonly _disposers: (() => void)[] = [];
     /**
@@ -126,6 +136,9 @@ export class Post {
      */
     private _first!: PostProcess;
     private _shaftsAttached = true;
+    private _finishAttached = true;
+    /** Simulation seconds. Drives the grain, so a paused frame has a still grain. */
+    private _time = 0;
     private _sunU = 0.5;
     private _sunV = 0.5;
     private _facing = 0;
@@ -137,12 +150,12 @@ export class Post {
 
     /** True once every pass in the chain has actually compiled. */
     get compiled(): boolean {
-        return this._composite.isReady() && this._shafts.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
+        return this._composite.isReady() && this._shafts.isReady() && this._finish.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
     }
 
     /** Fullscreen passes currently in the chain. Cheap to read, and it is what costs. */
     get passes(): number {
-        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0) + (this._shaftsAttached ? 1 : 0);
+        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0) + (this._shaftsAttached ? 1 : 0) + (this._finishAttached ? 1 : 0);
     }
 
     constructor(scene: Scene, settings: Settings, camera: Camera, sky: Sky) {
@@ -158,6 +171,7 @@ export class Post {
         ShaderStore.ShadersStoreWGSL["substrateBloomDownPixelShader"] = bloomDown;
         ShaderStore.ShadersStoreWGSL["substrateBloomUpPixelShader"] = bloomUp;
         ShaderStore.ShadersStoreWGSL["substrateGodraysPixelShader"] = godrays;
+        ShaderStore.ShadersStoreWGSL["substrateFinishPixelShader"] = finish;
 
         const engine = scene.getEngine();
         // EVERY PASS TAKES THE CAMERA AT CONSTRUCTION, and they are constructed in chain
@@ -239,10 +253,29 @@ export class Post {
 
         this._composite = new PostProcess("substrateComposite", "substrateComposite", {
             ...common,
-            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight"],
+            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight", "cpVignette"],
             samplers: ["cpBloom", "cpShafts"],
             size: 1.0,
         });
+        // AFTER the composite, and 8-bit rather than half-float on purpose: what the
+        // composite hands it is display-referred colour in 0..1, which is exactly what
+        // eight bits are for. Carrying it in fp16 would be another full-resolution buffer
+        // for range that no longer exists.
+        this._finish = new PostProcess("substrateFinish", "substrateFinish", {
+            ...common,
+            uniforms: ["fnParams", "fnTexel"],
+            size: 1.0,
+            textureType: Constants.TEXTURETYPE_UNSIGNED_BYTE,
+        });
+        this._finish.onApply = (effect) => {
+            const sharpen = (this._settings.v["post.sharpen"] as boolean) ? (this._settings.v["post.sharpenAmount"] as number) : 0;
+            const grain = (this._settings.v["post.grain"] as boolean) ? (this._settings.v["post.grainAmount"] as number) : 0;
+            // 24 Hz, not per frame. Film grain is re-exposed once per frame of film, and
+            // resampling it at 144 Hz makes it a shimmer rather than a texture.
+            effect.setFloat4("fnParams", sharpen, grain, Math.floor(this._time * 24), 0);
+            effect.setFloat2("fnTexel", 1 / Math.max(this._finish.width, 1), 1 / Math.max(this._finish.height, 1));
+        };
+
         this._composite.onApply = (effect) => {
             // Once, on the first frame the pyramid is actually sized. Rule 1 holds: after
             // this the branch is a boolean test.
@@ -251,6 +284,10 @@ export class Post {
                 this._probe();
             }
             effect.setFloat("sbTonemapMode", Math.max(0, TONEMAPS.indexOf(this._settings.v["post.tonemap"] as (typeof TONEMAPS)[number])));
+            // The real lens, so the falloff tracks the field of view rather than being a
+            // radial gradient that looks the same at every focal length.
+            const vignette = (this._settings.v["post.vignette"] as boolean) ? (this._settings.v["post.vignetteAmount"] as number) : 0;
+            effect.setFloat3("cpVignette", vignette, Math.tan(this._camera.fov * 0.5), this._composite.aspectRatio);
             // THE SCENE IS ALWAYS THE FIRST PASS'S INPUT, whatever the first pass turns
             // out to be. Babylon's automatic binding hands each pass the previous one's
             // OUTPUT, which for the composite is the top of the bloom pyramid — the one
@@ -285,6 +322,8 @@ export class Post {
         this._disposers.push(settings.on("sys.post", () => this._sync()));
         this._disposers.push(settings.on("post.bloom", () => this._sync()));
         this._disposers.push(settings.on("post.godrays", () => this._sync()));
+        this._disposers.push(settings.on("post.sharpen", () => this._sync()));
+        this._disposers.push(settings.on("post.grain", () => this._sync()));
         this._sync();
     }
 
@@ -343,18 +382,23 @@ export class Post {
         const wantPost = this._settings.v["sys.post"] as boolean;
         const wantBloom = wantPost && (this._settings.v["post.bloom"] as boolean);
         const wantShafts = wantPost && (this._settings.v["post.godrays"] as boolean);
-        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached || wantShafts !== this._shaftsAttached;
+        // One pass for two toggles: either of them needs it, neither of them means it is
+        // pure cost. The amounts still gate the work inside the shader.
+        const wantFinish = wantPost && ((this._settings.v["post.sharpen"] as boolean) || (this._settings.v["post.grain"] as boolean));
+        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached || wantShafts !== this._shaftsAttached || wantFinish !== this._finishAttached;
 
         if (changed) {
             for (const pass of this._down) this._camera.detachPostProcess(pass);
             for (const pass of this._up) this._camera.detachPostProcess(pass);
             this._camera.detachPostProcess(this._shafts);
+            this._camera.detachPostProcess(this._finish);
             this._camera.detachPostProcess(this._composite);
         }
 
         this._attached = wantPost;
         this._bloomAttached = wantBloom;
         this._shaftsAttached = wantShafts;
+        this._finishAttached = wantFinish;
         // The one texture everything downstream needs a handle on. Order of preference is
         // chain order, so this stays true as passes come and go.
         this._first = wantBloom ? this._down[0] : wantShafts ? this._shafts : this._composite;
@@ -368,6 +412,7 @@ export class Post {
         for (const pass of this._down) pass.autoClear = false;
         for (const pass of this._up) pass.autoClear = false;
         this._shafts.autoClear = false;
+        this._finish.autoClear = false;
         this._composite.autoClear = false;
         this._first.autoClear = true;
         // Always explicit now: the composite names the scene through `_first` in every
@@ -386,6 +431,7 @@ export class Post {
         // somewhere, and here it is next to the thing that consumes it.
         if (wantShafts) this._camera.attachPostProcess(this._shafts);
         this._camera.attachPostProcess(this._composite);
+        if (wantFinish) this._camera.attachPostProcess(this._finish);
     }
 
     /**
@@ -395,6 +441,18 @@ export class Post {
      * compiles late shows an untonemapped frame, which at this project's exposures is a
      * white rectangle.
      */
+    /**
+     * Advances the grain's clock.
+     *
+     * SIMULATION seconds, handed in from the frame loop, so a paused world has a still
+     * grain. Wall time would be the obvious choice and would quietly break every A/B
+     * measurement in this phase: two captures of an identical build would differ, and the
+     * pixel diff is the instrument that has caught every real Phase 9 bug.
+     */
+    update(dt: number): void {
+        this._time += dt;
+    }
+
     async prepare(): Promise<void> {
         for (let i = 0; i < 240 && !this.compiled; i++) {
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -425,6 +483,7 @@ export class Post {
         for (const pass of this._down) pass.dispose();
         for (const pass of this._up) pass.dispose();
         this._shafts.dispose();
+        this._finish.dispose();
         this._composite.dispose();
     }
 }

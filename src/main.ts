@@ -348,6 +348,8 @@ async function boot(): Promise<void> {
         embers.update(rig.camera, simDt);
         // After the wake that made the loose mass it reads.
         spray.update(rig.camera, mover, simDt);
+        // Simulation time, so the grain freezes with everything else when paused.
+        post.update(simDt);
         perf.end(S_SUBSTRATE);
 
         perf.begin(S_UNIFORMS);
