@@ -12,6 +12,7 @@ import { GpuTimings } from "./core/gpuTimer";
 import { Input } from "./core/input";
 import { Verbs } from "./play/verbs";
 import { Thrown } from "./play/thrown";
+import { Goals } from "./play/goals";
 import { CameraRig } from "./core/cameraRig";
 import { Mover } from "./core/mover";
 import { Sky } from "./render/sky";
@@ -69,6 +70,7 @@ async function boot(): Promise<void> {
     let rig!: CameraRig;
     let verbs!: Verbs;
     let thrown!: Thrown;
+    let goals!: Goals;
     let sky!: Sky;
     let shadows!: Shadows;
     let terrain!: Terrain;
@@ -172,6 +174,10 @@ async function boot(): Promise<void> {
         // simulations the harness has been driving since Phase 6.
         verbs = new Verbs(settings, fire, substrate, gait);
         thrown = new Thrown(scene, settings, rig.camera, sky, biome, verbs, Verbs.maxThrown);
+        // Phase 11 reads the world's events and adds meaning. Nothing below this line knows
+        // it exists; delete the file and the simulation is unchanged.
+        goals = new Goals(settings);
+        verbs.onDeposit = (x, z, volume) => goals.deposit(x, z, volume);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);
@@ -269,6 +275,12 @@ async function boot(): Promise<void> {
         // silently hit its capacity looks exactly like one that is still working. In
         // litres, because a carry capacity of 0.25 m3 reads as 250 and stays legible while
         // it fills, where the cubic-metre figure would be four leading zeros.
+        overlay.addCounter("mound", () => {
+            if (!goals.started) return "no site yet";
+            const pct = (goals.progress * 100).toFixed(0);
+            const stray = goals.strayed > 0 ? `, ${(goals.strayed * 1000).toFixed(0)} L strayed` : "";
+            return goals.complete ? `complete (${(goals.delivered * 1000).toFixed(0)} L)` : `${pct}% (${(goals.delivered * 1000).toFixed(0)} L)${stray}`;
+        });
         overlay.addCounter("carrying", () => {
             const litres = verbs.carried * 1000;
             const full = (settings.get("play.carryCapacity") as number) * 1000;
@@ -282,7 +294,7 @@ async function boot(): Promise<void> {
         gpu.register("substrate", () => substrate.gpuTime);
         gpu.register("airborne", () => airborne.gpuTime);
         gpu.register("heat", () => fire.gpuTime);
-        registerActions(overlay, settings, mover, rig, substrate, gait, wake, fire);
+        registerActions(overlay, settings, mover, rig, substrate, gait, wake, fire, goals);
     });
 
     try {
@@ -466,7 +478,7 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake, spray, verbs };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake, spray, verbs, goals };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
@@ -494,7 +506,7 @@ async function boot(): Promise<void> {
 }
 
 /** Overlay buttons. Phase 10's element interactions register here too. */
-function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, substrate: Substrate, gait: Gait, wake: Wake, fire: Fire): void {
+function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig: CameraRig, substrate: Substrate, gait: Gait, wake: Wake, fire: Fire, goals: Goals): void {
     const teleport = (x: number, z: number): void => {
         mover.teleport(x, z);
         mover.position.y = gait.groundAt(x, z);
@@ -510,6 +522,7 @@ function registerActions(overlay: Overlay, settings: Settings, mover: Mover, rig
         const next = BIOME_IDS[(BIOME_IDS.indexOf(current) + 1) % BIOME_IDS.length];
         settings.set("world.biome", next);
     });
+    overlay.addAction("reset mound", () => goals.reset());
     overlay.addAction("origin", () => teleport(0, 0));
     // The Phase 1 acceptance test, as one click.
     overlay.addAction("walk 800m", () => teleport(800, 0));

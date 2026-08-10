@@ -107,6 +107,16 @@ export class Verbs {
     private readonly _flight = new Float32Array(MAX_THROWN * 7);
     private _inFlight = 0;
 
+    /**
+     * Called whenever material reaches the ground, from a hand or from a landing throw.
+     *
+     * A single hook for both, because to anything downstream they are the same event —
+     * which is exactly why both routes were made to go through one scoop() call. A game
+     * layer that had to know which verb delivered a load would be coupled to the verbs
+     * rather than to the world.
+     */
+    onDeposit: ((x: number, z: number, volume: number) => void) | null = null;
+
     /** Projectiles still in the air. Read by the overlay; see the counter in main.ts. */
     get inFlight(): number {
         return this._inFlight;
@@ -219,6 +229,7 @@ export class Verbs {
                 this._ground.scoop(this.target.x, this.target.z, radius, -give);
                 this.carried -= give;
                 this.placed += give;
+                this.onDeposit?.(this.target.x, this.target.z, give);
             }
         }
     }
@@ -260,6 +271,7 @@ export class Verbs {
             this._ground.scoop(this._flight[o], this._flight[o + 2], this._settings.v["play.throwRadius"] as number, -volume);
             this.landed += volume;
             this.landings++;
+            this.onDeposit?.(this._flight[o], this._flight[o + 2], volume);
             this.lastLanding.x = this._flight[o];
             this.lastLanding.z = this._flight[o + 2];
 

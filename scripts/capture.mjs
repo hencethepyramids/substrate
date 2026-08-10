@@ -434,6 +434,50 @@ if (argv.has("gatherFor")) {
     );
 }
 
+// BUILD A MOUND, by hand and by throw, and check the game layer counted both. The claim
+// that matters is not the arithmetic — it is that a thrown load and a placed one arrive at
+// the same scoreboard, which is the reason both were routed through one deposit hook.
+if (argv.has("build")) {
+    const rounds = Number(argv.get("build")) || 2;
+    for (let i = 0; i < rounds; i++) {
+        await page.keyboard.down("q");
+        await page.waitForTimeout(900);
+        await page.keyboard.up("q");
+        // Alternate: place it at your feet, then throw the next one downrange. A throw
+        // lands well outside the site radius, so the second half also checks that a load
+        // delivered somewhere else is recorded as strayed rather than silently credited.
+        if (i % 2 === 0) {
+            await page.keyboard.down("f");
+            await page.waitForTimeout(1200);
+            await page.keyboard.up("f");
+        } else {
+            await page.keyboard.press("t");
+            await page.waitForTimeout(1600);
+        }
+    }
+    const g = await page.evaluate(() => {
+        const a = window.__substrate;
+        return {
+            started: a.goals.started,
+            delivered: a.goals.delivered,
+            strayed: a.goals.strayed,
+            progress: a.goals.progress,
+            placed: a.verbs.placed,
+            landed: a.verbs.landed,
+        };
+    });
+    // Everything the verbs put on the ground has to appear on the scoreboard as either
+    // delivered or strayed. A deposit that reached neither is a hook that did not fire.
+    const accounted = g.delivered + g.strayed;
+    const moved = g.placed + g.landed;
+    const ok = g.started && Math.abs(accounted - moved) < 1e-9;
+    console.log(
+        `goals: ${(g.delivered * 1000).toFixed(0)} L on site, ${(g.strayed * 1000).toFixed(0)} L strayed, ` +
+            `${(g.progress * 100).toFixed(0)}% of target; verbs moved ${(moved * 1000).toFixed(0)} L ` +
+            `${ok ? "(ALL ACCOUNTED)" : "*** A DEPOSIT WENT UNCOUNTED ***"}`,
+    );
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 
