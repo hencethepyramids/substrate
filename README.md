@@ -91,7 +91,7 @@ between "builds" and "the driver will accept this".
 | 7 — character | **done** |
 | 8 — traversal and wakes | **done** |
 | 9 — post | **done** |
-| 10 — interactions | not started |
+| 10 — interactions | in progress — verbs A-D |
 | 11 — game layer | not started |
 
 ### Phase 0 acceptance
@@ -975,6 +975,28 @@ lie, and a probe that renders identically twice is lying.
 | right mouse | carve — digs at `substrate.carveRate` metres per second, held |
 | `F1` / `` ` `` | overlay |
 | escape | release pointer |
+
+**Verbs** (Phase 10). Every one of them lands at `play.reach` metres directly in front of
+the character rather than under a cursor — a third-person camera has no cursor, and pointer
+lock is not available to a headless run.
+
+| | |
+| --- | --- |
+| `E` | ignite — dumps heat where you are pointed. Snow melts and refreezes, so it will not catch; a biome with fuel will |
+| `Q` | gather — held. Lifts material out of the ground and into your hands, up to `play.carryCapacity` |
+| `F` | place — held. Puts it back as a loose heap, free to slump at the angle of repose |
+| `R` | pack — held. Treads the ground down. Moves no material at all: compaction drives roughness, so a packed patch is what the screen-space reflections actually show |
+| `T` | throw — launches what you are carrying on a ballistic arc. The volume travels with the projectile, so the books balance mid-flight as well as at the ends |
+
+Gather, place and throw all move the same conserved quantity. `substrate.stamp()` is
+volume-neutral by construction — a footprint heaps up exactly what it pushes down — so
+carrying needed the one operation that deliberately is not: `scoop()` takes a **volume** in
+cubic metres and solves for the amplitude from the kernel's closed-form integral, which
+makes conservation a property of the interface rather than something a probe has to measure
+afterwards.
+
+The thrown projectile is not drawn yet. It is a real trajectory with a real impact and
+nothing in the air to look at.
 
 ---
 
