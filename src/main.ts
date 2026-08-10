@@ -401,6 +401,15 @@ async function boot(): Promise<void> {
         shadows.update(rig.camera);
         perf.end(S_SHADOWS);
 
+        // AFTER the shadows and BEFORE the depth pass, and that window is exactly one
+        // statement wide. shadows.update() renders the cascades, and Babylon restores the
+        // camera afterwards with a FORCED projection rebuild that discards TAA's subpixel
+        // jitter; depth.update() then pushes the camera to the depth pass, which has to be
+        // sampling the same subpixel position as the colour pass or every reprojection is
+        // half a pixel wrong. post.ts carries the full account, and a boot probe checks the
+        // jitter survived to the draw rather than trusting this comment.
+        post.jitter();
+
         // Before scene.render(), which is what draws the depth target: it is a custom
         // render target, so Babylon renders it as part of the frame, and the camera it is
         // drawn with has to be this frame's.

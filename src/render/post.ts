@@ -1,4 +1,7 @@
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
+import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
+import { CopyTextureToTexture } from "@babylonjs/core/Misc/copyTextureToTexture";
+import { Matrix } from "@babylonjs/core/Maths/math.vector";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import { Constants } from "@babylonjs/core/Engines/constants";
@@ -25,6 +28,7 @@ import bloomDown from "../shaders/bloomDown.fragment.wgsl?raw";
 import bloomUp from "../shaders/bloomUp.fragment.wgsl?raw";
 import godrays from "../shaders/godrays.fragment.wgsl?raw";
 import dof from "../shaders/dof.fragment.wgsl?raw";
+import taa from "../shaders/taa.fragment.wgsl?raw";
 import finish from "../shaders/finish.fragment.wgsl?raw";
 
 /**
@@ -78,9 +82,17 @@ import finish from "../shaders/finish.fragment.wgsl?raw";
  * The exaggeration that makes the effect visible is therefore a named slider rather than a
  * constant hidden in the maths.
  *
- * WHAT IS NOT HERE YET: SSR, heat distortion, TAA. TAA is blocked on history: Babylon's
- * own implementation ping-pongs its history AS its output, which the frame graph supports
- * and the classic post-process chain does not expose. That needs a mechanism, not a hack.
+ * PASS G — HEAT DISTORTION, and no pass at all: it is a UV offset computed at the top of
+ * the composite, so every later sample follows the refracted ray rather than being blended
+ * over it.
+ *
+ * PASS H — TAA, and the mechanism that was missing. A post process cannot choose its own
+ * output — Babylon hands each pass the NEXT pass's texture — so a history buffer cannot be
+ * ping-ponged the way Babylon's own frame-graph TAA does it. The answer is a texture this
+ * class owns and one blit a frame, which is also why TAA forces the finish pass on: a
+ * pass's output only exists as a texture if something comes after it.
+ *
+ * WHAT IS NOT HERE YET: SSR.
  */
 
 /**
@@ -149,6 +161,44 @@ const SHAFT_CEILING = 60;
  */
 const BLOOM_CEILING = 200;
 
+/**
+ * Length of the jitter sequence, and so how many subpixel positions the average is over.
+ * Eight is the usual answer and it is a resolve-time-versus-convergence trade: the blend
+ * below reaches steady state in roughly 1/TAA_KEEP frames either way, but a longer sequence
+ * takes longer to have VISITED every position, which is what actually antialiases.
+ */
+const TAA_SAMPLES = 8;
+
+/**
+ * How much of the current frame survives each blend, so the history is the other 90%.
+ *
+ * This is a time constant, not a strength: at 0.1 a pixel is 90% converged after about 22
+ * frames, which at 60 Hz is a third of a second. Lower is smoother and ghosts longer;
+ * higher is noisier and sharper. It is only safe this low because the neighbourhood clamp
+ * is there — without one, a tenth per frame is a quarter-second smear behind everything
+ * that moves.
+ */
+const TAA_KEEP = 0.1;
+
+/**
+ * The radical inverse of `index` in `base` — the digits of the index in that base,
+ * reflected about the point. Two coprime bases give a 2D sequence whose every prefix is
+ * spread evenly over the unit square, and "every prefix" is the property that matters here:
+ * TAA is always averaging a prefix, so a sequence that only becomes uniform once it
+ * finishes would put the edge in the wrong place until it did.
+ */
+function halton(index: number, base: number): number {
+    let f = 1;
+    let r = 0;
+    let n = index;
+    while (n > 0) {
+        f /= base;
+        r += f * (n % base);
+        n = Math.floor(n / base);
+    }
+    return r;
+}
+
 export class Post {
     private readonly _settings: Settings;
     private readonly _scene: Scene;
@@ -159,6 +209,12 @@ export class Post {
     private readonly _shafts: PostProcess;
     private readonly _finish: PostProcess;
     private readonly _dof: PostProcess;
+    private readonly _taa: PostProcess;
+    /** Last frame's resolved output. Owned here, filled by a blit — see _store(). */
+    private _history: RenderTargetTexture;
+    private readonly _copy: CopyTextureToTexture;
+    /** Last frame's world-to-clip, jitter included. What reprojection is measured against. */
+    private readonly _prevVP = Matrix.Identity();
     private readonly _sky: Sky;
     private _depth: Depth | null = null;
     private _fire: HeatSource | null = null;
@@ -172,6 +228,18 @@ export class Post {
     private _shaftsAttached = true;
     private _finishAttached = true;
     private _dofAttached = true;
+    /** Where in the jitter sequence this frame is. */
+    private _frame = 0;
+    private _jitterX = 0;
+    private _jitterY = 0;
+    /** The same, one frame back. The history is at pixel centres, so reprojection has to
+     * undo the offset the previous frame was rendered with — see taa.fragment.wgsl. */
+    private _prevJitterX = 0;
+    private _prevJitterY = 0;
+    /** Set whenever the history stops meaning anything: first frame, resize, toggle on. */
+    private _taaReset = true;
+    /** Whether this class currently owns the camera's projection matrix. */
+    private _frozen = false;
     /** Where the lens is focused this frame, in metres. Set from outside. */
     private _focus = 10;
     /** Simulation seconds. Drives the grain, so a paused frame has a still grain. */
@@ -183,16 +251,18 @@ export class Post {
     // against the settings on the last line of the constructor.
     private _attached = true;
     private _bloomAttached = true;
+    private _taaAttached = true;
     private _probed = false;
+    private _jitterProbed = false;
 
     /** True once every pass in the chain has actually compiled. */
     get compiled(): boolean {
-        return this._composite.isReady() && this._shafts.isReady() && this._finish.isReady() && this._dof.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
+        return this._composite.isReady() && this._shafts.isReady() && this._finish.isReady() && this._dof.isReady() && this._taa.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
     }
 
     /** Fullscreen passes currently in the chain. Cheap to read, and it is what costs. */
     get passes(): number {
-        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0) + (this._shaftsAttached ? 1 : 0) + (this._finishAttached ? 1 : 0) + (this._dofAttached ? 1 : 0);
+        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0) + (this._shaftsAttached ? 1 : 0) + (this._finishAttached ? 1 : 0) + (this._dofAttached ? 1 : 0) + (this._taaAttached ? 1 : 0);
     }
 
     constructor(scene: Scene, settings: Settings, camera: Camera, sky: Sky) {
@@ -210,6 +280,7 @@ export class Post {
         ShaderStore.ShadersStoreWGSL["substrateGodraysPixelShader"] = godrays;
         ShaderStore.ShadersStoreWGSL["substrateFinishPixelShader"] = finish;
         ShaderStore.ShadersStoreWGSL["substrateDofPixelShader"] = dof;
+        ShaderStore.ShadersStoreWGSL["substrateTaaPixelShader"] = taa;
 
         const engine = scene.getEngine();
         // EVERY PASS TAKES THE CAMERA AT CONSTRUCTION, and they are constructed in chain
@@ -334,19 +405,73 @@ export class Post {
             samplers: ["cpBloom", "cpShafts", "cpDepth", "cpDof", "sbFireTex", "sbSubTex"],
             size: 1.0,
         });
-        // AFTER the composite, and 8-bit rather than half-float on purpose: what the
-        // composite hands it is display-referred colour in 0..1, which is exactly what
-        // eight bits are for. Carrying it in fp16 would be another full-resolution buffer
-        // for range that no longer exists.
+        // AFTER the composite, so the colour arriving is display-referred and inside 0..1.
+        // That placement is about the sun: a min/max box over linear radiance containing a
+        // 59,000 sample spans five orders of magnitude and clamps nothing, and this phase
+        // has already lost three filters to exactly that number. After the curve the box
+        // means something.
+        //
+        // The one pass in the chain that WANTS the previous pass's output, so it is the one
+        // pass that leaves `externalTextureSamplerBinding` alone.
+        this._taa = new PostProcess("substrateTaa", "substrateTaa", {
+            ...common,
+            uniforms: ["taaPrevViewProj", "taaCamPos", "taaCamRight", "taaCamUp", "taaCamFwd", "taaLens", "taaParams", "taaTexel"],
+            samplers: ["taaHistory", "taaDepth"],
+            size: 1.0,
+        });
+        this._history = this._makeHistory(engine.getRenderWidth(true), engine.getRenderHeight(true));
+        this._copy = new CopyTextureToTexture(engine, false, true);
+        this._taa.onApply = (effect) => {
+            effect.setMatrix("taaPrevViewProj", this._prevVP);
+            const wm = this._camera.getWorldMatrix().m;
+            effect.setFloat3("taaCamRight", wm[0], wm[1], wm[2]);
+            effect.setFloat3("taaCamUp", wm[4], wm[5], wm[6]);
+            effect.setFloat3("taaCamFwd", wm[8], wm[9], wm[10]);
+            const cp = this._camera.globalPosition;
+            effect.setFloat3("taaCamPos", cp.x, cp.y, cp.z);
+            effect.setFloat2("taaLens", Math.tan(this._camera.fov * 0.5), this._taa.aspectRatio);
+            effect.setFloat2("taaTexel", 1 / Math.max(this._taa.width, 1), 1 / Math.max(this._taa.height, 1));
+            if (this._depth !== null) effect.setTexture("taaDepth", this._depth.target);
+            effect.setTexture("taaHistory", this._history);
+            // A DEBUG VIEW IS PRESENTED WHOLE. Blending an instrument with its own past
+            // is the temporal version of running a tonemap over it: the number displayed
+            // stops being this frame's answer and becomes a decaying average of the last
+            // twenty, which is the one thing an instrument must never do. Costs a compare.
+            const view = this._settings.v["debug.view"] as string;
+            effect.setFloat4("taaParams", this._taaReset || view !== "off" ? 1 : TAA_KEEP, view === "reprojection" ? 1 : 0, this._prevJitterX, this._prevJitterY);
+            if (!this._jitterProbed && this._frame > 2) {
+                this._jitterProbed = true;
+                this._probeJitter();
+            }
+            this._taaReset = false;
+        };
+
+        // AFTER the composite — and after TAA when that is on, which is always when it is
+        // on, because the resolve has to be the last thing that touches structure. Grain
+        // before it would be averaged into a smooth haze; sharpening before it would be
+        // undone by the very next blend.
+        //
+        // Half-float rather than the eight bits this held before pass H, and the reason is
+        // the history rather than this pass's own output. When TAA runs, this texture is
+        // what TAA renders into, and it is what gets copied to the history — so it is the
+        // precision the accumulation carries. A tenth of one level of 255 is zero, so an
+        // 8-bit history stalls a level short of the answer and leaves faint banding on
+        // every smooth gradient it was supposed to be smoothing.
         this._finish = new PostProcess("substrateFinish", "substrateFinish", {
             ...common,
             uniforms: ["fnParams", "fnTexel"],
             size: 1.0,
-            textureType: Constants.TEXTURETYPE_UNSIGNED_BYTE,
         });
         this._finish.onApply = (effect) => {
-            const sharpen = (this._settings.v["post.sharpen"] as boolean) ? (this._settings.v["post.sharpenAmount"] as number) : 0;
-            const grain = (this._settings.v["post.grain"] as boolean) ? (this._settings.v["post.grainAmount"] as number) : 0;
+            // OFF FOR EVERY DEBUG VIEW, and pass H is the second time this phase has had to
+            // learn it. Pass E found the vignette quietly multiplying the depth buffer;
+            // this is the same mistake one pass later. Grain over a motion-vector field
+            // adds plus or minus a pixel of fictional motion to every reading, and
+            // sharpening puts a halo on the edges of whatever is being measured. A debug
+            // view is a measurement, and a sensor is not part of what is being measured.
+            const raw = this._settings.v["debug.view"] !== "off";
+            const sharpen = !raw && (this._settings.v["post.sharpen"] as boolean) ? (this._settings.v["post.sharpenAmount"] as number) : 0;
+            const grain = !raw && (this._settings.v["post.grain"] as boolean) ? (this._settings.v["post.grainAmount"] as number) : 0;
             // 24 Hz, not per frame. Film grain is re-exposed once per frame of film, and
             // resampling it at 144 Hz makes it a shimmer rather than a texture.
             effect.setFloat4("fnParams", sharpen, grain, Math.floor(this._time * 24), 0);
@@ -435,6 +560,10 @@ export class Post {
         this._disposers.push(settings.on("post.sharpen", () => this._sync()));
         this._disposers.push(settings.on("post.grain", () => this._sync()));
         this._disposers.push(settings.on("post.dof", () => this._sync()));
+        this._disposers.push(settings.on("post.taa", () => this._sync()));
+        // The frame's last word: this frame's resolve becomes next frame's history.
+        const stored = scene.onAfterRenderObservable.add(() => this._store());
+        this._disposers.push(() => scene.onAfterRenderObservable.remove(stored));
         this._sync();
     }
 
@@ -494,10 +623,18 @@ export class Post {
         const wantBloom = wantPost && (this._settings.v["post.bloom"] as boolean);
         const wantShafts = wantPost && (this._settings.v["post.godrays"] as boolean);
         const wantDof = wantPost && (this._settings.v["post.dof"] as boolean) && this._depth !== null && this._depth.enabled;
+        // Depth is not optional here. Without it the history cannot be reprojected, and TAA
+        // without reprojection is what Babylon's own implementation is: fine for a still
+        // photograph, a smear the moment anything moves. Off is better than that.
+        const wantTaa = wantPost && (this._settings.v["post.taa"] as boolean) && this._depth !== null && this._depth.enabled;
         // One pass for two toggles: either of them needs it, neither of them means it is
         // pure cost. The amounts still gate the work inside the shader.
-        const wantFinish = wantPost && ((this._settings.v["post.sharpen"] as boolean) || (this._settings.v["post.grain"] as boolean));
-        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached || wantShafts !== this._shaftsAttached || wantFinish !== this._finishAttached || wantDof !== this._dofAttached;
+        // TAA is the third reason to run it, and not because it wants sharpening: the
+        // history blit reads TAA's output, and a pass's output is only a texture if
+        // something comes after it. With both toggles off this is a passthrough, which is
+        // the same fullscreen blit the copy needed anyway.
+        const wantFinish = wantPost && (wantTaa || (this._settings.v["post.sharpen"] as boolean) || (this._settings.v["post.grain"] as boolean));
+        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached || wantShafts !== this._shaftsAttached || wantFinish !== this._finishAttached || wantDof !== this._dofAttached || wantTaa !== this._taaAttached;
 
         if (changed) {
             for (const pass of this._down) this._camera.detachPostProcess(pass);
@@ -505,6 +642,7 @@ export class Post {
             this._camera.detachPostProcess(this._shafts);
             this._camera.detachPostProcess(this._finish);
             this._camera.detachPostProcess(this._dof);
+            this._camera.detachPostProcess(this._taa);
             this._camera.detachPostProcess(this._composite);
         }
 
@@ -513,6 +651,9 @@ export class Post {
         this._shaftsAttached = wantShafts;
         this._finishAttached = wantFinish;
         this._dofAttached = wantDof;
+        // Coming on means the history is a texture full of an old frame, or of nothing.
+        if (wantTaa && !this._taaAttached) this._taaReset = true;
+        this._taaAttached = wantTaa;
         // The one texture everything downstream needs a handle on. Order of preference is
         // chain order, so this stays true as passes come and go.
         this._first = wantBloom ? this._down[0] : wantShafts ? this._shafts : wantDof ? this._dof : this._composite;
@@ -528,6 +669,7 @@ export class Post {
         this._shafts.autoClear = false;
         this._finish.autoClear = false;
         this._dof.autoClear = false;
+        this._taa.autoClear = false;
         this._composite.autoClear = false;
         this._first.autoClear = true;
         // Always explicit now: the composite names the scene through `_first` in every
@@ -547,6 +689,7 @@ export class Post {
         if (wantShafts) this._camera.attachPostProcess(this._shafts);
         if (wantDof) this._camera.attachPostProcess(this._dof);
         this._camera.attachPostProcess(this._composite);
+        if (wantTaa) this._camera.attachPostProcess(this._taa);
         if (wantFinish) this._camera.attachPostProcess(this._finish);
     }
 
@@ -594,6 +737,148 @@ export class Post {
         this._focus = manual > 0 ? manual : focusDistance;
     }
 
+    /**
+     * Nudges the projection by less than a pixel, so consecutive frames sample the scene at
+     * different points inside the same pixel. That offset IS the supersample; everything
+     * the resolve does afterwards is just averaging it.
+     *
+     * ITS PLACE IN THE FRAME IS LOAD-BEARING, AND IT IS NARROWER THAN IT LOOKS. This has to
+     * happen AFTER shadows.update() and BEFORE depth.update(), and both halves were paid
+     * for. It started inside update(), which is early in the frame and seemed obviously
+     * safe; the frame then rendered with no jitter at all, because shadows.update() draws
+     * the cascade targets and Babylon's ObjectRenderer.initRender calls
+     * `getProjectionMatrix(TRUE)` to restore the camera afterwards — a forced recompute
+     * that rebuilds the matrix from the field of view and throws the jitter away. Nothing
+     * reports this. TAA went on subtracting a jitter that was never applied, and the only
+     * symptom was a uniform subpixel error in the reprojection, which is why _probeJitter()
+     * below is permanent.
+     *
+     * The other side is depth.update(), which pushes this matrix to the depth pass — the
+     * buffer TAA reprojects with. Jitter after that and colour and depth sample the world
+     * half a pixel apart, which reads as a permanently soft image with nothing to blame.
+     *
+     * SET, NOT ADD. Row 2's first two entries are exactly zero in an unjittered perspective
+     * matrix, which is what makes writing them idempotent — and idempotence is required,
+     * because Babylon hands back a CACHED matrix. Adding an offset per frame would
+     * accumulate into a permanent skew inside a second.
+     */
+    jitter(): void {
+        if (!this._taaAttached) {
+            // Hand the matrix back. Leaving it frozen would pin the projection at whatever
+            // field of view was current when TAA was switched off, and the fov slider would
+            // silently stop working — a far worse bug than the one freezing solves.
+            if (this._frozen) {
+                this._frozen = false;
+                this._jitterX = 0;
+                this._jitterY = 0;
+                this._camera.unfreezeProjectionMatrix();
+                this._camera.getProjectionMatrix(true);
+            }
+            return;
+        }
+
+        // FREEZING IS THE MECHANISM, and ordering alone was not enough. Writing the jitter
+        // into Babylon's cached matrix is a bet that nothing rebuilds it before the draw,
+        // and that bet loses twice a frame: the shadow cascades restore the camera with
+        // `getProjectionMatrix(true)`, and so does at least one render target inside
+        // scene.render(). A forced rebuild reconstructs the matrix from the field of view
+        // and the jitter is simply gone, with nothing anywhere to say so.
+        //
+        // `freezeProjectionMatrix` is the supported way to say "this matrix is mine now":
+        // the flag it sets is tested BEFORE the force flag, so a forced rebuild becomes a
+        // no-op rather than a fight. So each frame the matrix is handed back, rebuilt clean
+        // from the current field of view, stamped, and taken over again — which also means
+        // the fov slider keeps working, because the rebuild is where it gets read.
+        this._camera.unfreezeProjectionMatrix();
+        const proj = this._camera.getProjectionMatrix(true);
+
+        this._frame = (this._frame + 1) % TAA_SAMPLES;
+        const engine = this._scene.getEngine();
+        // Halton is 0..1 across the pixel; NDC spans 2 across the frame, so a pixel is 2/w.
+        this._jitterX = ((halton(this._frame + 1, 2) - 0.5) * 2) / engine.getRenderWidth(true);
+        this._jitterY = ((halton(this._frame + 1, 3) - 0.5) * 2) / engine.getRenderHeight(true);
+        proj.setRowFromFloats(2, this._jitterX, this._jitterY, proj.m[10], proj.m[11]);
+
+        this._camera.freezeProjectionMatrix();
+        this._frozen = true;
+    }
+
+    /**
+     * Ends the frame: this frame's resolve becomes next frame's history, and this frame's
+     * camera becomes next frame's reprojection.
+     *
+     * AFTER scene.render(), where nothing is bound. The blit binds its own framebuffer, and
+     * issuing it between two passes of the chain would do that in the middle of someone
+     * else's render pass.
+     */
+    private _store(): void {
+        if (!this._taaAttached) return;
+        const src = this._finish.inputTexture;
+        if (!src || !src.texture) return;
+        // The copy has its own shader and it is not ready on the first frames. Presenting
+        // one more frame without history is correct; blending against a texture that was
+        // never written is a dark ghost that takes a second to fade.
+        if (!this._copy.isReady()) {
+            this._taaReset = true;
+            return;
+        }
+        if (this._history.getSize().width !== src.width || this._history.getSize().height !== src.height) {
+            // The window changed. A same-size blit is the fast path precisely because it
+            // refuses to scale, so the buffer is rebuilt and one frame goes out without
+            // history rather than stretched.
+            this._history.dispose();
+            this._history = this._makeHistory(src.width, src.height);
+            this._taaReset = true;
+            return;
+        }
+        this._copy.copy(src.texture, this._history);
+        this._prevVP.copyFrom(this._camera.getTransformationMatrix());
+        this._prevJitterX = this._jitterX;
+        this._prevJitterY = this._jitterY;
+    }
+
+    /**
+     * Reports whether the jitter this class applied is the jitter the frame was rendered
+     * with.
+     *
+     * A BOOT PROBE, and it is the house pattern for exactly this shape of problem. The
+     * jitter is written into Babylon's CACHED projection matrix, which is a bet: that
+     * nothing between here and the draw recomputes it. If that bet loses, the frame renders
+     * unjittered, TAA still subtracts a jitter that was never applied, and the result is a
+     * uniform subpixel offset in the reprojection — which is exactly what the motion probe
+     * measured. Read the matrix back mid-render and the question is answered rather than
+     * argued about.
+     */
+    private _probeJitter(): void {
+        const m = this._camera.getProjectionMatrix().m;
+        const px = this._scene.getEngine().getRenderWidth(true) * 0.5;
+        // A thousandth of a pixel. The matrix is a Float32Array and the jitter is a double,
+        // so an exact comparison fails on rounding alone — which it duly did, and reported
+        // a wipe that had not happened.
+        const applied = Math.abs(m[8] - this._jitterX) * px < 1e-3 && Math.abs(m[9] - this._jitterY) * px < 1e-3;
+        console.info(
+            `[substrate] taa jitter: wrote (${(this._jitterX * px).toFixed(3)}, ${(this._jitterY * px).toFixed(3)}) px, matrix holds (${(m[8] * px).toFixed(3)}, ${(m[9] * px).toFixed(3)}) px ` +
+                `${applied ? "(survived to the draw)" : "*** WIPED — something recomputed the projection after the jitter ***"}`,
+        );
+    }
+
+    private _makeHistory(width: number, height: number): RenderTargetTexture {
+        const rt = new RenderTargetTexture("substrateHistory", { width, height }, this._scene, {
+            generateMipMaps: false,
+            type: Constants.TEXTURETYPE_HALF_FLOAT,
+            samplingMode: Constants.TEXTURE_BILINEAR_SAMPLINGMODE,
+            // Nothing ever depth-tests into this. It is a blit target.
+            generateDepthBuffer: false,
+            generateStencilBuffer: false,
+        });
+        // CLAMP, and load-bearing rather than tidy: reprojection routinely lands outside
+        // the frame, and a wrapping history answers with the opposite edge — a thin band of
+        // the wrong side of the screen smeared along every border.
+        rt.wrapU = Constants.TEXTURE_CLAMP_ADDRESSMODE;
+        rt.wrapV = Constants.TEXTURE_CLAMP_ADDRESSMODE;
+        return rt;
+    }
+
     async prepare(): Promise<void> {
         for (let i = 0; i < 240 && !this.compiled; i++) {
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -619,6 +904,11 @@ export class Post {
     }
 
     dispose(): void {
+        if (this._frozen) {
+            this._frozen = false;
+            this._camera.unfreezeProjectionMatrix();
+            this._camera.getProjectionMatrix(true);
+        }
         for (const off of this._disposers) off();
         this._disposers.length = 0;
         for (const pass of this._down) pass.dispose();
@@ -626,6 +916,9 @@ export class Post {
         this._shafts.dispose();
         this._finish.dispose();
         this._dof.dispose();
+        this._taa.dispose();
+        this._history.dispose();
+        this._copy.dispose();
         this._composite.dispose();
     }
 }
