@@ -7,6 +7,7 @@ import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Settings } from "../core/settings";
 import { TONEMAPS } from "../core/settings";
 import type { Sky } from "./sky";
+import type { Depth } from "./depth";
 import composite from "../shaders/composite.fragment.wgsl?raw";
 import bloomDown from "../shaders/bloomDown.fragment.wgsl?raw";
 import bloomUp from "../shaders/bloomUp.fragment.wgsl?raw";
@@ -129,6 +130,7 @@ export class Post {
     private readonly _shafts: PostProcess;
     private readonly _finish: PostProcess;
     private readonly _sky: Sky;
+    private _depth: Depth | null = null;
     private readonly _disposers: (() => void)[] = [];
     /**
      * Whichever pass currently runs first. Its input IS the frame as rendered, and that
@@ -253,8 +255,8 @@ export class Post {
 
         this._composite = new PostProcess("substrateComposite", "substrateComposite", {
             ...common,
-            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight", "cpVignette"],
-            samplers: ["cpBloom", "cpShafts"],
+            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight", "cpVignette", "cpShowDepth"],
+            samplers: ["cpBloom", "cpShafts", "cpDepth"],
             size: 1.0,
         });
         // AFTER the composite, and 8-bit rather than half-float on purpose: what the
@@ -288,6 +290,12 @@ export class Post {
             // radial gradient that looks the same at every focal length.
             const vignette = (this._settings.v["post.vignette"] as boolean) ? (this._settings.v["post.vignetteAmount"] as number) : 0;
             effect.setFloat3("cpVignette", vignette, Math.tan(this._camera.fov * 0.5), this._composite.aspectRatio);
+            // The depth buffer, shown raw when asked for. Bound to the scene otherwise, so
+            // the sampler always points at something legal.
+            const hasDepth = this._depth !== null && this._depth.enabled;
+            effect.setFloat("cpShowDepth", hasDepth && this._settings.v["debug.view"] === "depthBuffer" ? 1 : 0);
+            if (hasDepth) effect.setTexture("cpDepth", this._depth!.target);
+            else effect.setTextureFromPostProcess("cpDepth", this._first);
             // THE SCENE IS ALWAYS THE FIRST PASS'S INPUT, whatever the first pass turns
             // out to be. Babylon's automatic binding hands each pass the previous one's
             // OUTPUT, which for the composite is the top of the bloom pyramid — the one
@@ -432,6 +440,11 @@ export class Post {
         if (wantShafts) this._camera.attachPostProcess(this._shafts);
         this._camera.attachPostProcess(this._composite);
         if (wantFinish) this._camera.attachPostProcess(this._finish);
+    }
+
+    /** The depth pass, once it exists. Built after this one, because it needs the meshes. */
+    setDepth(depth: Depth): void {
+        this._depth = depth;
     }
 
     /**

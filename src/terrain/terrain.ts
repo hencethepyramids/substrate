@@ -183,6 +183,10 @@ export class Terrain {
         // the shaded one produces creeping stripes that look exactly like bad bias.
         this._pushClipmap(m);
         this._pushClipmap(this._shadows.terrainCast);
+        // And the depth pass, for the third time and the same reason. Three passes solve
+        // the clipmap; all three must agree on where a vertex is, or the depth buffer
+        // describes a surface nobody drew.
+        if (this._depth !== null) this._pushClipmap(this._depth.terrainDepth);
 
         m.setVector3("fCameraPos", camPos);
         m.setColor3("fAlbedo", this._albedo);
@@ -224,6 +228,13 @@ export class Terrain {
     }
 
     /** The clipmap and field uniforms, shared by the beauty pass and the cascades. */
+    /** The depth pass, if there is one. Set after construction: it needs the camera. */
+    setDepth(depth: { terrainDepth: ShaderMaterial } | null): void {
+        this._depth = depth;
+    }
+
+    private _depth: { terrainDepth: ShaderMaterial } | null = null;
+
     private _pushClipmap(m: ShaderMaterial): void {
         const s = this._settings.v;
         m.setVector2("tCenter", this._center);

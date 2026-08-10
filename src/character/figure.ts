@@ -113,6 +113,13 @@ export class Figure {
         this.mesh.doNotSyncBoundingInfo = true;
     }
 
+    /** The depth pass's skinned material, if there is one. */
+    setDepthMaterial(m: ShaderMaterial | null): void {
+        this._depthMaterial = m;
+    }
+
+    private _depthMaterial: ShaderMaterial | null = null;
+
     async prepare(): Promise<void> {
         this._push();
         this.castMaterial.setArray4("skBones", this._skeleton.palette);
@@ -155,5 +162,9 @@ export class Figure {
         // compiled with.
         m.setArray4("skBones", this._skeleton.palette);
         this.castMaterial.setArray4("skBones", this._skeleton.palette);
+        // And the depth pass. setArray4 stores by reference, so this is three pointers to
+        // one array rather than three copies — which is also why all three cannot
+        // disagree about the pose.
+        this._depthMaterial?.setArray4("skBones", this._skeleton.palette);
     }
 }

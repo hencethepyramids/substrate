@@ -37,9 +37,31 @@ uniform cpShaftWeight: f32;
 /// field of view. z: aspect ratio.
 uniform cpVignette: vec3f;
 
+/// The depth pass's buffer, in metres. Bound to the scene with the debug flag off.
+var cpDepthSampler: sampler;
+var cpDepth: texture_2d<f32>;
+
+/// Non-zero shows the depth buffer instead of the frame.
+uniform cpShowDepth: f32;
+
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
     var scene = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+
+    // THE DEPTH BUFFER, SHOWN THROUGH THE SAME RAMP THE TERRAIN USES FOR ITS OWN
+    // linearDepth VIEW. That is the entire point of this branch: the terrain computes
+    // distance in its fragment shader from its own interpolated world position, and this
+    // pass computes it in a separate geometry pass and stores it in a separate target.
+    // Two independent paths to one number, displayed identically — so a pixel diff between
+    // the two views answers both "is the depth right" and, far more sharply, "do the two
+    // buffers even line up", which a vertical flip somewhere in the render-target
+    // plumbing would otherwise hide until it silently ruined a reprojection.
+    if (uniforms.cpShowDepth > 0.5) {
+        let metres = textureSample(cpDepth, cpDepthSampler, input.vUV).r;
+        let ramp = 1.0 - exp(-metres * 0.0016);
+        fragmentOutputs.color = vec4f(vec3f(ramp), 1.0);
+        return fragmentOutputs;
+    }
 
     // MIXED, NOT ADDED, and the distinction is the whole physical claim. Bloom here is
     // veiling glare: light that should have landed on one point of the sensor and instead
@@ -67,16 +89,6 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let shafts = textureSample(cpShafts, cpShaftsSampler, input.vUV).rgb;
     scene = vec4f(scene.rgb + shafts * (uniforms.cpShaftWeight * saturate(scene.a)), scene.a);
 
-    // ALPHA IS THE TRANSFORM WEIGHT, and it exists for the debug views. Most of them do
-    // not emit light — `vec3f(roughness)` is a number between 0 and 1 that means "how
-    // rough", and running a film curve over it turns a linear ramp into a curved one. The
-    // instrument stops reading in the units it is labelled in, which is the exact failure
-    // this project keeps writing probes to catch.
-    //
-    // So anything that emits radiance writes 1 here and gets the curve; a debug view
-    // showing a raw quantity writes 0 and arrives at the backbuffer untouched. Saturated
-    // because additive blending pushes alpha past 1 and an unclamped mix would then
-    // extrapolate past the tonemapped colour instead of landing on it.
     // VIGNETTE, BEFORE THE CURVE, BECAUSE IT IS A LENS AND NOT A LOOK. Less light reaches
     // the corner of a sensor than the centre, and the falloff is not an arbitrary radial
     // gradient — it is cos^4 of the angle off the optical axis, which for a pinhole is
@@ -89,14 +101,32 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // back down the curve, so a blown highlight in the corner rolls off into colour
     // instead of staying flat white and getting greyer. Applied after the transform it
     // would just be a grey wash.
+    //
+    // GATED BY THE CLASS WEIGHT, like the bloom and the shafts above — and this one was
+    // missed when it was written. Pass E caught it by displaying the depth buffer through
+    // the same ramp the terrain uses for its own linearDepth view and diffing the two: the
+    // numbers disagreed by a steady 24%, which is not what a wrong depth buffer looks like
+    // and is exactly what a lens falloff quietly multiplying an instrument looks like. A
+    // debug view is a measurement, and no light reached a sensor to fall off.
     if (uniforms.cpVignette.x > 0.0) {
         let ndc = input.vUV * 2.0 - vec2f(1.0);
         // Position on the sensor in units of focal length.
         let sensor = vec2f(ndc.x * uniforms.cpVignette.y * uniforms.cpVignette.z, ndc.y * uniforms.cpVignette.y);
         let cos2 = 1.0 / (1.0 + dot(sensor, sensor));
-        scene = vec4f(scene.rgb * mix(1.0, cos2 * cos2, uniforms.cpVignette.x), scene.a);
+        let falloff = mix(1.0, cos2 * cos2, uniforms.cpVignette.x * saturate(scene.a));
+        scene = vec4f(scene.rgb * falloff, scene.a);
     }
 
+    // ALPHA IS THE TRANSFORM WEIGHT, and it exists for the debug views. Most of them do
+    // not emit light — `vec3f(roughness)` is a number between 0 and 1 that means "how
+    // rough", and running a film curve over it turns a linear ramp into a curved one. The
+    // instrument stops reading in the units it is labelled in, which is the exact failure
+    // this project keeps writing probes to catch.
+    //
+    // So anything that emits radiance writes 1 here and gets the curve; a debug view
+    // showing a raw quantity writes 0 and arrives at the backbuffer untouched. Saturated
+    // because additive blending pushes alpha past 1 and an unclamped mix would then
+    // extrapolate past the tonemapped colour instead of landing on it.
     let mapped = sbDisplay(scene.rgb);
     fragmentOutputs.color = vec4f(mix(scene.rgb, mapped, saturate(scene.a)), 1.0);
 }

@@ -15,6 +15,7 @@ import { Mover } from "./core/mover";
 import { Sky } from "./render/sky";
 import { Shadows } from "./render/shadows";
 import { Post } from "./render/post";
+import { Depth } from "./render/depth";
 import { Terrain } from "./terrain/terrain";
 import { Substrate } from "./substrate/substrate";
 import { Carve } from "./substrate/carve";
@@ -78,6 +79,7 @@ async function boot(): Promise<void> {
     let cloak!: Cloak;
     let spray!: Spray;
     let post!: Post;
+    let depth!: Depth;
     let overlay!: Overlay;
     let unbindEngine: () => void = () => {};
 
@@ -148,6 +150,15 @@ async function boot(): Promise<void> {
         // read. The cloak is the opposite: its solver already works in world space, so the
         // shared pass multiplying by an identity world matrix is exactly right.
         shadows.setCasters(terrain.mesh, [{ mesh: character.mesh, material: character.castMaterial }, { mesh: cloak.mesh }]);
+        // Linear view distance for the whole frame. Same three meshes, same includes, same
+        // reason the cascades take overrides: the clipmap displaces in its vertex shader
+        // and the figure is skinned, so a generic depth pass would draw neither.
+        depth = new Depth(scene, settings, rig.camera);
+        depth.setCasters(terrain.mesh, [{ mesh: character.mesh, material: depth.skinnedDepth }, { mesh: cloak.mesh }]);
+        depth.bindField(terrain.field.texture);
+        terrain.setDepth(depth);
+        character.setDepthMaterial(depth.skinnedDepth);
+        post.setDepth(depth);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);
@@ -188,6 +199,7 @@ async function boot(): Promise<void> {
         await cloak.prepare();
         report(0.3);
         await shadows.prepare();
+        await depth.prepare();
         report(0.5);
 
         rig.snap();
@@ -206,6 +218,7 @@ async function boot(): Promise<void> {
             character.update(rig.camera);
             cloak.update(rig.camera, 1 / 60);
             shadows.update(rig.camera);
+            depth.update();
             scene.render();
             if (terrain.ready && sky.ready && shadows.ready && substrate.ready && character.ready && cloak.ready && scene.isReady()) break;
             await nextFrame();
@@ -221,6 +234,7 @@ async function boot(): Promise<void> {
                 `character material ${character.compiled ? "ok" : "FAILED"}, ` +
                 `cloak ${cloak.compiled ? "ok" : "FAILED"}, ` +
                 `composite ${post.compiled ? "ok" : "FAILED"}, ` +
+                `depth ${depth.compiled ? "ok" : "FAILED"}, ` +
                 `height mirror ${terrain.field.mirrorValid ? "ok" : "FAILED"}, ` +
                 `ground at origin ${terrain.field.sampleHeight(0, 0).toFixed(2)} m`,
         );
@@ -239,6 +253,7 @@ async function boot(): Promise<void> {
         // Rule 7: register a provider, not a counter. The wrapper is swapped out
         // whenever the atlas is resized, so a cached reference would go stale.
         gpu.register("shadow cascades", () => shadows.gpuTime);
+        gpu.register("depth", () => depth.gpuTime);
         gpu.register("substrate", () => substrate.gpuTime);
         gpu.register("airborne", () => airborne.gpuTime);
         gpu.register("heat", () => fire.gpuTime);
@@ -252,6 +267,19 @@ async function boot(): Promise<void> {
         return;
     }
     await loader.dismiss();
+
+    // The depth buffer against a distance the CPU worked out on its own. AFTER the loading
+    // screen, not inside it: the readback forces a render flush, and a flush inside the
+    // boot loop changes how many frames the substrate relaxed for. The probe was visibly
+    // perturbing the picture it existed to check, which is the one thing a diagnostic may
+    // never do.
+    void (async () => {
+        // A few real frames first: straight after dismiss the target has been sized but not
+        // yet drawn by the frame loop, and reading it then reports zero — a probe that
+        // fires too early does not say "not ready", it says "wrong".
+        for (let i = 0; i < 8; i++) await nextFrame();
+        await depth.probeWorld(mover.position);
+    })();
 
     // -----------------------------------------------------------------------
     // Frame loop
@@ -366,6 +394,11 @@ async function boot(): Promise<void> {
         shadows.update(rig.camera);
         perf.end(S_SHADOWS);
 
+        // Before scene.render(), which is what draws the depth target: it is a custom
+        // render target, so Babylon renders it as part of the frame, and the camera it is
+        // drawn with has to be this frame's.
+        depth.update();
+
         perf.begin(S_RENDER);
         scene.render();
         perf.end(S_RENDER);
@@ -399,6 +432,7 @@ async function boot(): Promise<void> {
         terrain.dispose();
         cloak.dispose();
         post.dispose();
+        depth.dispose();
         airProbe.dispose();
         character.dispose();
         groundProbe.dispose();

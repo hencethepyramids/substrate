@@ -49,6 +49,7 @@ export const DEBUG_VIEWS = [
     "off",
     "normals",
     "linearDepth",
+    "depthBuffer",
     "terrain.rings",
     "terrain.morph",
     "terrain.slope",
