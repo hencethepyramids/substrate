@@ -366,8 +366,11 @@ if (argv.has("throw")) {
         facing: window.__substrate.mover.facing,
     }));
     await page.keyboard.press("t");
-    // Long enough for the whole arc; the probe checks it actually came down.
-    await page.waitForTimeout(2000);
+    // Long enough for the whole arc by default; `--throw=<ms>` shortens it to catch the
+    // projectile still in the air, which is the only way to photograph the thing that pass
+    // E exists to draw. The report below tells the two cases apart rather than insisting on
+    // a landing, so a mid-air run is a measurement and not a failure.
+    await page.waitForTimeout(Number(argv.get("throw")) || 2000);
     const v = await page.evaluate(() => ({
         thrown: window.__substrate.verbs.thrown,
         landed: window.__substrate.verbs.landed,
@@ -380,11 +383,18 @@ if (argv.has("throw")) {
     const dz = v.lz - before.z;
     const range = Math.hypot(dx, dz);
     const off = Math.abs(((Math.atan2(dx, dz) - before.facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-    const ok = v.landings === 1 && Math.abs(v.thrown - v.landed) < 1e-9 && v.carried === 0 && off < 1e-3;
-    console.log(
-        `verbs: threw ${v.thrown.toFixed(6)} m3, landed ${v.landed.toFixed(6)} m3 after ${range.toFixed(2)} m, ` +
-            `${v.landings} landing(s), bearing off facing by ${off.toFixed(6)} rad ${ok ? "(CONSERVED)" : "*** LOST IN FLIGHT ***"}`,
-    );
+    const air = await page.evaluate(() => window.__substrate.verbs.inFlight);
+    if (air > 0) {
+        // Still up. Nothing has landed, so the only claim available is that the volume is
+        // accounted for somewhere — and "in the air" is somewhere.
+        console.log(`verbs: ${air} in the air, ${v.thrown.toFixed(6)} m3 thrown and ${v.landed.toFixed(6)} m3 landed so far (mid-flight)`);
+    } else {
+        const ok = v.landings === 1 && Math.abs(v.thrown - v.landed) < 1e-9 && v.carried === 0 && off < 1e-3;
+        console.log(
+            `verbs: threw ${v.thrown.toFixed(6)} m3, landed ${v.landed.toFixed(6)} m3 after ${range.toFixed(2)} m, ` +
+                `${v.landings} landing(s), bearing off facing by ${off.toFixed(6)} rad ${ok ? "(CONSERVED)" : "*** LOST IN FLIGHT ***"}`,
+        );
+    }
 }
 
 // Hold the gather key and STOP, leaving material in the hands — the one verb state that

@@ -11,6 +11,7 @@ import { Perf } from "./core/perf";
 import { GpuTimings } from "./core/gpuTimer";
 import { Input } from "./core/input";
 import { Verbs } from "./play/verbs";
+import { Thrown } from "./play/thrown";
 import { CameraRig } from "./core/cameraRig";
 import { Mover } from "./core/mover";
 import { Sky } from "./render/sky";
@@ -67,6 +68,7 @@ async function boot(): Promise<void> {
     let input!: Input;
     let rig!: CameraRig;
     let verbs!: Verbs;
+    let thrown!: Thrown;
     let sky!: Sky;
     let shadows!: Shadows;
     let terrain!: Terrain;
@@ -169,6 +171,7 @@ async function boot(): Promise<void> {
         // Phase 10: the layer that lets the person holding the keyboard reach the
         // simulations the harness has been driving since Phase 6.
         verbs = new Verbs(settings, fire, substrate, gait);
+        thrown = new Thrown(scene, settings, rig.camera, sky, biome, verbs, Verbs.maxThrown);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);
@@ -363,6 +366,9 @@ async function boot(): Promise<void> {
         // AFTER the mover, so a verb is aimed with this frame's facing. At a sprint a
         // target built from last frame's heading lands visibly off to the side of a turn.
         verbs.update(input, mover, simDt);
+        // After the verbs, so the quads carry this frame's positions rather than last
+        // frame's — at 9 m/s that is 15 cm of visible lag on every throw.
+        thrown.update();
         perf.end(S_CAMERA);
 
         // Before the scene render, not inside it: a rebake binds its own target, and
@@ -465,6 +471,7 @@ async function boot(): Promise<void> {
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();
         overlay.dispose();
+        thrown.dispose();
         spray.dispose();
         embers.dispose();
         fire.dispose();

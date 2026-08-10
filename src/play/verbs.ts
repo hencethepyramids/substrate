@@ -112,6 +112,24 @@ export class Verbs {
         return this._inFlight;
     }
 
+    /**
+     * The raw flight records, so the renderer draws the simulation rather than a copy of
+     * it. Stride 7: x, y, z, vx, vy, vz, volume.
+     *
+     * Exposed rather than mirrored deliberately. A renderer that kept its own positions and
+     * integrated them alongside would drift from these within a second of a frame-rate
+     * wobble, and the ball would land somewhere other than where the impact is registered —
+     * a bug that looks like a physics problem and is a bookkeeping one.
+     */
+    get flight(): Float32Array {
+        return this._flight;
+    }
+
+    /** How many records the array holds, for a renderer sizing its buffers once. */
+    static get maxThrown(): number {
+        return MAX_THROWN;
+    }
+
     constructor(settings: Settings, fire: Igniter, ground: Ground, heights: Heights) {
         this._settings = settings;
         this._fire = fire;
