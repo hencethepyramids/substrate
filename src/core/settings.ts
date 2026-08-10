@@ -207,6 +207,7 @@ export const SCHEMA = {
 
     "play.digRadius": num({ group: "Play", label: "Dig radius", def: 0.55, min: 0.2, max: 2, step: 0.05, unit: "m" }),
     "play.digRate": num({ group: "Play", label: "Dig rate", def: 0.35, min: 0.02, max: 2, step: 0.01, unit: "m3/s", hint: "Volume moved per second while gathering or placing. A shovelful is roughly 0.01 m3, so this is a brisk but not absurd pace." }),
+    "play.packRate": num({ group: "Play", label: "Pack rate", def: 0.9, min: 0.05, max: 4, step: 0.05, unit: "/s", hint: "Compaction added per second while packing. Compaction drives albedo and roughness, so packed ground is both a different colour and smoother — which is what makes it reflect." }),
     "play.carryCapacity": num({ group: "Play", label: "Carry capacity", def: 0.25, min: 0.02, max: 2, step: 0.01, unit: "m3" }),
 
     // -- Post ----------------------------------------------------------------

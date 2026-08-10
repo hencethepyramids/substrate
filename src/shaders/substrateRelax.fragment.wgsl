@@ -44,7 +44,8 @@ uniform srStep: vec4f;
 uniform srStamp: vec4f;
 
 /// Which kernel the queued stamp uses. 1 = the volume-neutral bowl above, 0 = the pure
-/// Gaussian below, which moves material into or out of the world instead of around it.
+/// Gaussian below, which moves material into or out of the world instead of around it,
+/// and 2 = the same Gaussian writing compaction only, which moves nothing at all.
 uniform srStampKind: f32;
 
 /// Most of its loose mass a texel may hand to any ONE neighbour in a step. The eight
@@ -175,6 +176,23 @@ fn srStamped(state: vec4f, worldXZ: vec2f) -> vec4f {
     // Negative puts it back as loose mass sitting proud of the surface, which is what a
     // dropped shovelful is: heaped, uncompacted, and free to slump at the angle of repose
     // the very next relaxation step.
+    // PACKING MOVES NO MATERIAL, and that is what separates it from the two above. Treading
+    // snow down does not carry it anywhere: it squeezes the air out from between the
+    // crystals, so the same material occupies less space and holds together better. Depth
+    // and mass are therefore untouched here and only compaction rises — which is the
+    // channel the terrain already reads to decide both albedo and ROUGHNESS, so packing a
+    // patch of snow makes it visibly smoother, and Phase 9's reflections light up on it
+    // without this pass knowing that reflections exist.
+    //
+    // Clamped here rather than only at the end of the step: srStamped() is applied to all
+    // nine taps before the Laplacian is taken, so an unclamped spike would bleed outward
+    // through diffusion before the write-out clamp ever saw it.
+    if (uniforms.srStampKind > 1.5) {
+        var t = state;
+        t.z = min(t.z + srScoopKernel(worldXZ) * amount, 1.0);
+        return t;
+    }
+
     if (uniforms.srStampKind < 0.5) {
         let g = srScoopKernel(worldXZ) * amount;
         var t = state;

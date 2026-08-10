@@ -14,6 +14,7 @@ export interface Igniter {
 /** What a verb needs of the ground: the one operation that is not volume-neutral. */
 export interface Ground {
     scoop(x: number, z: number, radius: number, volume: number): void;
+    pack(x: number, z: number, radius: number, amount: number): void;
 }
 
 /** Where the player is and which way they are pointed. */
@@ -73,6 +74,8 @@ export class Verbs {
     /** Running totals, so a probe can check the two halves against each other. */
     gathered = 0;
     placed = 0;
+    /** Compaction applied, for a probe. Not conserved — packing moves nothing. */
+    packed = 0;
 
     private readonly _settings: Settings;
     private readonly _fire: Igniter;
@@ -120,6 +123,15 @@ export class Verbs {
                 this.carried += take;
                 this.gathered += take;
             }
+        } else if (input.pack) {
+            // NOTHING TO CONSERVE HERE, which is why this sits outside the carried-volume
+            // bookkeeping entirely. Packing squeezes air out from between the crystals; the
+            // material stays exactly where it was and simply occupies less of it. The one
+            // channel that changes is compaction — and because the terrain already reads
+            // compaction for roughness, treading a patch down is what makes it reflect.
+            const amount = (this._settings.v["play.packRate"] as number) * dt;
+            this._ground.pack(this.target.x, this.target.z, radius, amount);
+            this.packed += amount;
         } else if (input.place) {
             const give = Math.min(step, this.carried);
             if (give > 0) {

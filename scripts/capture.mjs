@@ -341,6 +341,16 @@ if (argv.has("dig")) {
     );
 }
 
+// Tread the ground down in front of the character. Compaction drives roughness, so this
+// is also the setup for checking that Phase 9's reflections appear where Phase 10 packs.
+if (argv.has("packFor")) {
+    await page.keyboard.down("r");
+    await page.waitForTimeout(Number(argv.get("packFor")) || 800);
+    await page.keyboard.up("r");
+    const v = await page.evaluate(() => ({ packed: window.__substrate.verbs.packed, x: window.__substrate.verbs.target.x, z: window.__substrate.verbs.target.z }));
+    console.log(`verbs: packed ${v.packed.toFixed(3)} at ${v.x.toFixed(2)}, ${v.z.toFixed(2)}`);
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 

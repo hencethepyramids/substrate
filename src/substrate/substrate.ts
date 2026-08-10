@@ -304,6 +304,18 @@ export class Substrate {
         this._enqueue(x, z, r, volume / (Math.PI * r * r), 0);
     }
 
+    /**
+     * Press material together without moving any of it.
+     *
+     * `amount` is compaction added at the centre, 0 to 1, falling off as the same Gaussian
+     * the scoop uses. Neither depth nor mass changes: packing squeezes the air out from
+     * between the crystals rather than carrying anything anywhere, so there is no volume to
+     * account for and this needs no conservation story at all.
+     */
+    pack(x: number, z: number, radius: number, amount: number): void {
+        this._enqueue(x, z, Math.max(radius, 1e-3), amount, 2);
+    }
+
     private _enqueue(x: number, z: number, radius: number, amount: number, kind: number): void {
         if (amount === 0) return;
         if (this._pending >= QUEUE_LENGTH) {

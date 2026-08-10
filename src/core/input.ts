@@ -43,6 +43,8 @@ export class Input {
      */
     gather = false;
     place = false;
+    /** Held — tread the ground down. A rate, like the two above. */
+    pack = false;
     /** Accumulated mouse delta in raw pixels since the last endFrame(). */
     lookX = 0;
     lookY = 0;
@@ -151,6 +153,7 @@ export class Input {
         this.slide = anyDown(this._down, KEY_SLIDE);
         this.gather = this._down.has("KeyQ");
         this.place = this._down.has("KeyF");
+        this.pack = this._down.has("KeyR");
     }
 
     /** Zero the accumulated deltas. Call at the bottom of the frame, after everything has read them. */
