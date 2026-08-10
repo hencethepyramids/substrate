@@ -286,6 +286,32 @@ if (walkMs > 0) {
     }
 }
 
+// A VERB, THROUGH THE REAL INPUT PATH. Not `app.verbs.ignite(...)` — pressing the key is
+// what makes this an end-to-end check: it exercises the keydown listener, the auto-repeat
+// filter, the per-frame consumption in endFrame(), the enable toggle and the aiming, any
+// one of which can be wrong while the call underneath is perfect.
+if (argv.has("press")) {
+    await page.keyboard.press(argv.get("press"));
+    await page.waitForTimeout(250);
+    const v = await page.evaluate(() => {
+        const a = window.__substrate;
+        const dx = a.verbs.target.x - a.mover.position.x;
+        const dz = a.verbs.target.z - a.mover.position.z;
+        return {
+            n: a.verbs.ignitions,
+            reach: Math.hypot(dx, dz),
+            // The target's bearing must BE the facing angle: target = position +
+            // (sin f, cos f) * reach, so atan2(dx, dz) inverts to exactly f.
+            bearing: Math.atan2(dx, dz),
+            facing: a.mover.facing,
+            want: a.settings.get("play.reach"),
+        };
+    });
+    const off = Math.abs(((v.bearing - v.facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    const ok = v.n === 1 && Math.abs(v.reach - v.want) < 1e-3 && off < 1e-4;
+    console.log(`verbs: ${v.n} ignition(s), aimed ${v.reach.toFixed(3)} m out (want ${v.want}), bearing off facing by ${off.toFixed(6)} rad ${ok ? "(OK)" : "*** WRONG ***"}`);
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 

@@ -10,6 +10,7 @@ import { BiomeState } from "./core/biome";
 import { Perf } from "./core/perf";
 import { GpuTimings } from "./core/gpuTimer";
 import { Input } from "./core/input";
+import { Verbs } from "./play/verbs";
 import { CameraRig } from "./core/cameraRig";
 import { Mover } from "./core/mover";
 import { Sky } from "./render/sky";
@@ -65,6 +66,7 @@ async function boot(): Promise<void> {
     let gpu!: GpuTimings;
     let input!: Input;
     let rig!: CameraRig;
+    let verbs!: Verbs;
     let sky!: Sky;
     let shadows!: Shadows;
     let terrain!: Terrain;
@@ -163,6 +165,10 @@ async function boot(): Promise<void> {
         // The element's roughness, so the reflection pass and the terrain agree about how
         // smooth the packed trail is.
         post.setSurface(terrain);
+
+        // Phase 10: the layer that lets the person holding the keyboard reach the
+        // simulations the harness has been driving since Phase 6.
+        verbs = new Verbs(settings, fire);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);
@@ -341,6 +347,10 @@ async function boot(): Promise<void> {
         perf.begin(S_CAMERA);
         // The rig uses real time, not simulation time — pausing must not freeze the camera.
         rig.update(input, mover.position, perf.dt);
+
+        // AFTER the mover, so a verb is aimed with this frame's facing. At a sprint a
+        // target built from last frame's heading lands visibly off to the side of a turn.
+        verbs.update(input, mover);
         perf.end(S_CAMERA);
 
         // Before the scene render, not inside it: a rebake binds its own target, and
@@ -438,7 +448,7 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake, spray };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake, spray, verbs };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();

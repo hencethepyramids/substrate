@@ -23,6 +23,16 @@ export class Input {
     slide = false;
     /** Right mouse held — the carve input (Phase 8). */
     carve = false;
+    /**
+     * Pressed THIS FRAME — the ignite verb (Phase 10).
+     *
+     * Edge triggered, unlike everything above it, and the difference is the point: `move`
+     * and `carve` are states the world samples continuously, while a verb is an event that
+     * happens once. Holding the key must not light a new fire every frame, so this is set
+     * on the press and cleared by endFrame(), and auto-repeat is filtered — a held key
+     * repeats about thirty times a second and would otherwise stack thirty ignitions.
+     */
+    ignite = false;
     /** Accumulated mouse delta in raw pixels since the last endFrame(). */
     lookX = 0;
     lookY = 0;
@@ -41,6 +51,7 @@ export class Input {
             const ev = e as KeyboardEvent;
             if (isTypingTarget(ev.target)) return;
             this._down.add(ev.code);
+            if (ev.code === "KeyE" && !ev.repeat) this.ignite = true;
         });
         this._listen(window, "keyup", (e) => this._down.delete((e as KeyboardEvent).code));
         // A lost focus with keys held would otherwise leave the character sprinting forever.
@@ -135,6 +146,8 @@ export class Input {
         this.lookX = 0;
         this.lookY = 0;
         this.wheel = 0;
+        // Verbs are consumed by the frame that saw them, like the deltas above.
+        this.ignite = false;
     }
 
     dispose(): void {

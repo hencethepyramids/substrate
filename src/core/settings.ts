@@ -110,6 +110,7 @@ export const SCHEMA = {
     "sys.wake": bool({ group: "Systems", label: "Swept wake", def: true }),
     "sys.spray": bool({ group: "Systems", label: "Spray + particles", def: true }),
     "sys.post": bool({ group: "Systems", label: "Post chain", def: true }),
+    "sys.verbs": bool({ group: "Systems", label: "Player verbs", def: true }),
 
     // -- Terrain -------------------------------------------------------------
     "terrain.heightScale": num({ group: "Terrain", label: "Height scale", def: 1, min: 0.05, max: 2.5, step: 0.01, hint: "Applied when the field is read, so it is live with no rebake." }),
@@ -200,6 +201,9 @@ export const SCHEMA = {
     "render.fpsCap": num({ group: "Render", label: "FPS cap", def: 0, min: 0, max: 360, step: 10, hint: "0 = uncapped." }),
     "render.exposure": num({ group: "Render", label: "Exposure", def: 0, min: -4, max: 4, step: 0.05, unit: "EV" }),
     "render.fov": num({ group: "Render", label: "Field of view", def: 62, min: 40, max: 110, step: 1, unit: "deg" }),
+
+    // -- Play ----------------------------------------------------------------
+    "play.reach": num({ group: "Play", label: "Reach", def: 1.6, min: 0.5, max: 4, step: 0.1, unit: "m", hint: "How far in front of the character a verb lands. This is arm's length, not a cursor: a third-person camera has no cursor, and pointer lock is not available to a headless run." }),
 
     // -- Post ----------------------------------------------------------------
     "post.tonemap": enm({ group: "Post", label: "Tonemap", def: "agx", options: TONEMAPS }),
