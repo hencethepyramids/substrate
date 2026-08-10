@@ -260,6 +260,18 @@ async function boot(): Promise<void> {
         overlay.addCounter("substrate steps", () => String(substrate.steps));
         // One stamp lands per step, so a queue that is not draining is real information.
         overlay.addCounter("carve queue", () => (substrate.dropped > 0 ? `${substrate.pending} (${substrate.dropped} dropped)` : String(substrate.pending)));
+        // THE CARRIED VOLUME IS THE ONE VERB STATE WITH NO REPRESENTATION ON SCREEN. A fire
+        // is visible, a hole is visible, a packed patch is visible — but material in the
+        // hands is a number the player is holding and cannot see, and a held gather that
+        // silently hit its capacity looks exactly like one that is still working. In
+        // litres, because a carry capacity of 0.25 m3 reads as 250 and stays legible while
+        // it fills, where the cubic-metre figure would be four leading zeros.
+        overlay.addCounter("carrying", () => {
+            const litres = verbs.carried * 1000;
+            const full = (settings.get("play.carryCapacity") as number) * 1000;
+            const flight = verbs.inFlight > 0 ? ` +${verbs.inFlight} in air` : "";
+            return `${litres.toFixed(0)} / ${full.toFixed(0)} L${flight}`;
+        });
         // Rule 7: register a provider, not a counter. The wrapper is swapped out
         // whenever the atlas is resized, so a cached reference would go stale.
         gpu.register("shadow cascades", () => shadows.gpuTime);

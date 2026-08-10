@@ -107,6 +107,11 @@ export class Verbs {
     private readonly _flight = new Float32Array(MAX_THROWN * 7);
     private _inFlight = 0;
 
+    /** Projectiles still in the air. Read by the overlay; see the counter in main.ts. */
+    get inFlight(): number {
+        return this._inFlight;
+    }
+
     constructor(settings: Settings, fire: Igniter, ground: Ground, heights: Heights) {
         this._settings = settings;
         this._fire = fire;

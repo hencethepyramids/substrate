@@ -387,6 +387,21 @@ if (argv.has("throw")) {
     );
 }
 
+// Hold the gather key and STOP, leaving material in the hands — the one verb state that
+// has no representation in the world, and therefore the only one whose readout has to be
+// checked by reading the overlay rather than by looking at the ground.
+if (argv.has("gatherFor")) {
+    await page.keyboard.down("q");
+    await page.waitForTimeout(Number(argv.get("gatherFor")) || 500);
+    await page.keyboard.up("q");
+    await page.waitForTimeout(150);
+    const v = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll(".sb-sec *")).map((e) => e.textContent ?? "");
+        return { carried: window.__substrate.verbs.carried, row: rows.find((t) => t.includes("/") && t.includes("L")) ?? "(not rendered)" };
+    });
+    console.log(`verbs: carrying ${(v.carried * 1000).toFixed(0)} L, overlay reads "${v.row}"`);
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 
