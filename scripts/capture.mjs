@@ -312,6 +312,35 @@ if (argv.has("press")) {
     console.log(`verbs: ${v.n} ignition(s), aimed ${v.reach.toFixed(3)} m out (want ${v.want}), bearing off facing by ${off.toFixed(6)} rad ${ok ? "(OK)" : "*** WRONG ***"}`);
 }
 
+// GATHER, MOVE, PLACE — the conservation test for Phase 10's carrying verbs.
+// Holds the dig key, steps aside, holds the place key, and reports the books. The claim is
+// exact and has no tuning in it: every cubic metre that left the ground has to come back,
+// and the hands have to end empty.
+if (argv.has("dig")) {
+    const ms = Number(argv.get("dig")) || 800;
+    await page.keyboard.down("q");
+    await page.waitForTimeout(ms);
+    await page.keyboard.up("q");
+    const held = await page.evaluate(() => window.__substrate.verbs.carried);
+    // Step aside so the heap goes somewhere other than the hole it came from.
+    await page.keyboard.down("d");
+    await page.waitForTimeout(600);
+    await page.keyboard.up("d");
+    await page.waitForTimeout(200);
+    await page.keyboard.down("f");
+    await page.waitForTimeout(ms * 2);
+    await page.keyboard.up("f");
+    const v = await page.evaluate(() => {
+        const a = window.__substrate;
+        return { carried: a.verbs.carried, gathered: a.verbs.gathered, placed: a.verbs.placed, cap: a.settings.get("play.carryCapacity"), dropped: a.substrate.dropped };
+    });
+    const balanced = Math.abs(v.gathered - v.placed) < 1e-9 && v.carried < 1e-9;
+    console.log(
+        `verbs: gathered ${v.gathered.toFixed(6)} m3, placed ${v.placed.toFixed(6)} m3, still held ${v.carried.toFixed(9)} ` +
+            `(peak ${held.toFixed(6)} vs capacity ${v.cap}), stamps dropped ${v.dropped} ${balanced ? "(BALANCED)" : "*** DOES NOT BALANCE ***"}`,
+    );
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 

@@ -205,6 +205,10 @@ export const SCHEMA = {
     // -- Play ----------------------------------------------------------------
     "play.reach": num({ group: "Play", label: "Reach", def: 1.6, min: 0.5, max: 4, step: 0.1, unit: "m", hint: "How far in front of the character a verb lands. This is arm's length, not a cursor: a third-person camera has no cursor, and pointer lock is not available to a headless run." }),
 
+    "play.digRadius": num({ group: "Play", label: "Dig radius", def: 0.55, min: 0.2, max: 2, step: 0.05, unit: "m" }),
+    "play.digRate": num({ group: "Play", label: "Dig rate", def: 0.35, min: 0.02, max: 2, step: 0.01, unit: "m3/s", hint: "Volume moved per second while gathering or placing. A shovelful is roughly 0.01 m3, so this is a brisk but not absurd pace." }),
+    "play.carryCapacity": num({ group: "Play", label: "Carry capacity", def: 0.25, min: 0.02, max: 2, step: 0.01, unit: "m3" }),
+
     // -- Post ----------------------------------------------------------------
     "post.tonemap": enm({ group: "Post", label: "Tonemap", def: "agx", options: TONEMAPS }),
     "post.taa": bool({ group: "Post", label: "TAA", def: true }),

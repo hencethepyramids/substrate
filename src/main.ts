@@ -168,7 +168,7 @@ async function boot(): Promise<void> {
 
         // Phase 10: the layer that lets the person holding the keyboard reach the
         // simulations the harness has been driving since Phase 6.
-        verbs = new Verbs(settings, fire);
+        verbs = new Verbs(settings, fire, substrate);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);
@@ -350,7 +350,7 @@ async function boot(): Promise<void> {
 
         // AFTER the mover, so a verb is aimed with this frame's facing. At a sprint a
         // target built from last frame's heading lands visibly off to the side of a turn.
-        verbs.update(input, mover);
+        verbs.update(input, mover, simDt);
         perf.end(S_CAMERA);
 
         // Before the scene render, not inside it: a rebake binds its own target, and

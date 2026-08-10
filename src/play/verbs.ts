@@ -11,6 +11,11 @@ export interface Igniter {
     ignite(x: number, z: number, radius: number, rate: number): void;
 }
 
+/** What a verb needs of the ground: the one operation that is not volume-neutral. */
+export interface Ground {
+    scoop(x: number, z: number, radius: number, volume: number): void;
+}
+
 /** Where the player is and which way they are pointed. */
 export interface Actor {
     readonly position: { x: number; y: number; z: number };
@@ -49,13 +54,34 @@ export class Verbs {
     readonly target = { x: 0, z: 0 };
     /** Verbs performed this session, so a probe can assert one happened. */
     ignitions = 0;
+    /**
+     * Material in the player's hands, in cubic metres.
+     *
+     * THE CONSERVED QUANTITY, and the reason gather and place are one pass rather than two
+     * features. substrate.stamp() is volume-neutral by construction — a footprint pushes
+     * down exactly what it heaps up — which is right for walking and useless for carrying,
+     * because there is nowhere for the material to go. scoop() is the deliberate exception:
+     * it takes a VOLUME and moves it across the boundary between the world and something
+     * holding it. This is that something.
+     *
+     * Every cubic metre that leaves the ground is added here and every one placed is taken
+     * off, so the books balance by construction rather than by measurement — and the amount
+     * the shader actually moves follows from the kernel's closed-form integral, so the
+     * number here is the number the ground loses.
+     */
+    carried = 0;
+    /** Running totals, so a probe can check the two halves against each other. */
+    gathered = 0;
+    placed = 0;
 
     private readonly _settings: Settings;
     private readonly _fire: Igniter;
+    private readonly _ground: Ground;
 
-    constructor(settings: Settings, fire: Igniter) {
+    constructor(settings: Settings, fire: Igniter, ground: Ground) {
         this._settings = settings;
         this._fire = fire;
+        this._ground = ground;
     }
 
     /**
@@ -65,7 +91,7 @@ export class Verbs {
      * last frame's — a verb aimed one frame behind a turn lands visibly off to the side at
      * a sprint.
      */
-    update(input: Input, actor: Actor): void {
+    update(input: Input, actor: Actor, dt: number): void {
         const reach = this._settings.v["play.reach"] as number;
         this.target.x = actor.position.x + Math.sin(actor.facing) * reach;
         this.target.z = actor.position.z + Math.cos(actor.facing) * reach;
@@ -78,6 +104,33 @@ export class Verbs {
             // every capture that verified fire verified something the player cannot do.
             this._fire.ignite(this.target.x, this.target.z, this._settings.v["fire.igniteRadius"] as number, this._settings.v["fire.igniteRate"] as number);
             this.ignitions++;
+        }
+
+        // A RATE, NOT AN EVENT, so what moves per second does not depend on the frame rate.
+        // Both directions clamp against the same two limits — the hands cannot hold more
+        // than their capacity and cannot give what they do not have — which is what keeps
+        // `carried` inside [0, capacity] without a separate guard, and what makes a held key
+        // stop rather than run negative.
+        const radius = this._settings.v["play.digRadius"] as number;
+        const step = (this._settings.v["play.digRate"] as number) * dt;
+        if (input.gather) {
+            const take = Math.min(step, (this._settings.v["play.carryCapacity"] as number) - this.carried);
+            if (take > 0) {
+                this._ground.scoop(this.target.x, this.target.z, radius, take);
+                this.carried += take;
+                this.gathered += take;
+            }
+        } else if (input.place) {
+            const give = Math.min(step, this.carried);
+            if (give > 0) {
+                // Negative volume is the same operation run backwards: material returns as
+                // loose mass sitting proud of the surface, which is what a dropped
+                // shovelful is — heaped, uncompacted, and free to slump at the angle of
+                // repose on the very next relaxation step.
+                this._ground.scoop(this.target.x, this.target.z, radius, -give);
+                this.carried -= give;
+                this.placed += give;
+            }
         }
     }
 }

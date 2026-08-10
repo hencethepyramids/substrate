@@ -33,6 +33,16 @@ export class Input {
      * repeats about thirty times a second and would otherwise stack thirty ignitions.
      */
     ignite = false;
+    /**
+     * Held — gather material into the hands, and put it back.
+     *
+     * States rather than events, unlike `ignite` above, and the difference follows the
+     * physics rather than the input convention: lighting a fire is a moment, and digging is
+     * a rate. A verb that moves a quantity per second has to be sampled per frame or the
+     * amount moved would depend on the frame rate.
+     */
+    gather = false;
+    place = false;
     /** Accumulated mouse delta in raw pixels since the last endFrame(). */
     lookX = 0;
     lookY = 0;
@@ -139,6 +149,8 @@ export class Input {
 
         this.sprint = anyDown(this._down, KEY_SPRINT);
         this.slide = anyDown(this._down, KEY_SLIDE);
+        this.gather = this._down.has("KeyQ");
+        this.place = this._down.has("KeyF");
     }
 
     /** Zero the accumulated deltas. Call at the bottom of the frame, after everything has read them. */

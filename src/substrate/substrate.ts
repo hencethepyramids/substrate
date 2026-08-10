@@ -133,7 +133,9 @@ export class Substrate {
     private readonly _stamp = new Vector4(0, 0, 1, 0);
     private readonly _probeCentre = new Vector2(0, 0);
     /** Ring of (x, z, radius, depth). Preallocated — rule 1 reaches in here every frame. */
-    private readonly _queue = new Float32Array(QUEUE_LENGTH * 4);
+    private readonly _queue = new Float32Array(QUEUE_LENGTH * 5);
+    /** Which kernel the dequeued stamp uses. See srStampKind in the relax shader. */
+    private _stampKind = 1;
     private _qHead = 0;
     private _pending = 0;
 
@@ -280,11 +282,40 @@ export class Substrate {
             this.dropped++;
             return;
         }
-        const i = ((this._qHead + this._pending) % QUEUE_LENGTH) * 4;
+        this._enqueue(x, z, Math.max(radius, 1e-3), depth, 1);
+    }
+
+    /**
+     * Take material OUT of the world, or put it back.
+     *
+     * `volume` is in cubic metres and is the physical quantity the caller gains or gives
+     * up; positive lifts material out. The amplitude the shader needs follows from the
+     * kernel's closed-form integral — a Gaussian of radius r integrates to pi*r^2 over the
+     * plane — so the conversion happens once, here, and conservation is a property of the
+     * API rather than something a probe has to go and measure afterwards.
+     *
+     * This is the one substrate operation that is NOT volume-neutral, and it is deliberate:
+     * stamp() moves material around inside the world, and this moves it across the boundary
+     * between the world and something holding it.
+     */
+    scoop(x: number, z: number, radius: number, volume: number): void {
+        if (volume === 0) return;
+        const r = Math.max(radius, 1e-3);
+        this._enqueue(x, z, r, volume / (Math.PI * r * r), 0);
+    }
+
+    private _enqueue(x: number, z: number, radius: number, amount: number, kind: number): void {
+        if (amount === 0) return;
+        if (this._pending >= QUEUE_LENGTH) {
+            this.dropped++;
+            return;
+        }
+        const i = ((this._qHead + this._pending) % QUEUE_LENGTH) * 5;
         this._queue[i] = x;
         this._queue[i + 1] = z;
-        this._queue[i + 2] = Math.max(radius, 1e-3);
-        this._queue[i + 3] = depth;
+        this._queue[i + 2] = radius;
+        this._queue[i + 3] = amount;
+        this._queue[i + 4] = kind;
         this._pending++;
     }
 
@@ -302,8 +333,9 @@ export class Substrate {
             this._stamp.w = 0;
             return;
         }
-        const i = this._qHead * 4;
+        const i = this._qHead * 5;
         this._stamp.set(this._queue[i], this._queue[i + 1], this._queue[i + 2], this._queue[i + 3]);
+        this._stampKind = this._queue[i + 4];
         this._qHead = (this._qHead + 1) % QUEUE_LENGTH;
         this._pending--;
     }
@@ -440,6 +472,7 @@ export class Substrate {
         target.setVector2("srShift", this._shift);
         target.setVector4("srStep", this._step);
         target.setVector4("srStamp", this._stamp);
+        target.setFloat("srStampKind", this._stampKind);
     }
 
     /** Zero both buffers, in place, through the pass's own reset path. */

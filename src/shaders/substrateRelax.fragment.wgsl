@@ -43,6 +43,10 @@ uniform srStep: vec4f;
 /// xy: world centre, z: radius in metres, w: depth in metres. Zero depth is no stamp.
 uniform srStamp: vec4f;
 
+/// Which kernel the queued stamp uses. 1 = the volume-neutral bowl above, 0 = the pure
+/// Gaussian below, which moves material into or out of the world instead of around it.
+uniform srStampKind: f32;
+
 /// Most of its loose mass a texel may hand to any ONE neighbour in a step. The eight
 /// neighbours are weighted 1 (axial) and 1/sqrt2 (diagonal) and sum to 6.83, so 0.14
 /// caps total outflow just under the mass actually present. That cap is what stops a
@@ -146,8 +150,49 @@ fn srStampKernel(worldXZ: vec2f) -> f32 {
 /// Applied on every read, including all eight neighbours, so the whole stencil sees the
 /// same world — rather than the centre texel seeing a pit its neighbours have not heard
 /// about, which would make the first frame of any carve non-conservative.
+/// NOT volume-neutral, and that is the entire point.
+///
+/// g(u) = e^(-u^2), whose integral over the plane is exactly pi * radius^2. Where the bowl
+/// above conserves material by construction — everything it pushes down it heaps up — this
+/// one has a known, non-zero volume, which is what makes it usable as a TRANSFER. Material
+/// leaves the ground here and has to go somewhere; the caller is trusted to be holding it.
+///
+/// Stating the integral in closed form is what lets substrate.ts take a VOLUME in cubic
+/// metres and solve for the amplitude, rather than exposing an amplitude and hoping the
+/// bookkeeping downstream matches. Conservation then holds by construction instead of by
+/// measurement: what a scoop removes is the number the caller asked to be given.
+fn srScoopKernel(worldXZ: vec2f) -> f32 {
+    let d = worldXZ - uniforms.srStamp.xy;
+    let u2 = dot(d, d) / max(uniforms.srStamp.z * uniforms.srStamp.z, 1e-6);
+    return exp(-u2);
+}
+
 fn srStamped(state: vec4f, worldXZ: vec2f) -> vec4f {
     let amount = uniforms.srStamp.w;
+
+    // A TRANSFER, NOT A DISPLACEMENT. Positive lifts material out and leaves a hollow with
+    // no rim, because the material is not beside the hole — it is in the player's hands.
+    // Negative puts it back as loose mass sitting proud of the surface, which is what a
+    // dropped shovelful is: heaped, uncompacted, and free to slump at the angle of repose
+    // the very next relaxation step.
+    if (uniforms.srStampKind < 0.5) {
+        let g = srScoopKernel(worldXZ) * amount;
+        var t = state;
+        // SIGNED INTO DEPRESSION, which is the same convention the bowl above uses for its
+        // pit and its rim: positive is a hollow, negative stands proud. The first version
+        // wrote only max(g, 0) here and put the deposit into mass alone — the books
+        // balanced perfectly and the ground never rose, because nothing had told the
+        // surface it was higher. The depression debug view showed it immediately: a red
+        // hollow where the material was dug and nothing at all where it was dropped.
+        t.x = t.x + g;
+        // Material that has been carried and dropped is LOOSE. Only the deposit adds mass,
+        // because only the deposit is placing something on top of the surface, and that is
+        // what lets it slump at the angle of repose on the next relaxation step instead of
+        // standing as a permanent cone.
+        t.y = t.y + max(-g, 0.0);
+        return t;
+    }
+
     let k = srStampKernel(worldXZ);
     let pit = max(k, 0.0);
     let rim = max(-k, 0.0);
