@@ -8,6 +8,18 @@ import type { Settings } from "../core/settings";
 import { TONEMAPS } from "../core/settings";
 import type { Sky } from "./sky";
 import type { Depth } from "./depth";
+import type { FireTarget } from "../fire/fire";
+import type { SubstrateTarget } from "../substrate/substrate";
+
+/** What the composite needs from the fire, without Post having to know what a fire is. */
+export interface HeatSource {
+    bindTo(target: FireTarget): void;
+}
+/** Likewise the substrate window, which is where the heat field lives. */
+export interface HeatWindow {
+    pushTo(target: SubstrateTarget): void;
+    bindTo(target: SubstrateTarget): void;
+}
 import composite from "../shaders/composite.fragment.wgsl?raw";
 import bloomDown from "../shaders/bloomDown.fragment.wgsl?raw";
 import bloomUp from "../shaders/bloomUp.fragment.wgsl?raw";
@@ -149,6 +161,8 @@ export class Post {
     private readonly _dof: PostProcess;
     private readonly _sky: Sky;
     private _depth: Depth | null = null;
+    private _fire: HeatSource | null = null;
+    private _window: HeatWindow | null = null;
     private readonly _disposers: (() => void)[] = [];
     /**
      * Whichever pass currently runs first. Its input IS the frame as rendered, and that
@@ -316,8 +330,8 @@ export class Post {
 
         this._composite = new PostProcess("substrateComposite", "substrateComposite", {
             ...common,
-            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight", "cpVignette", "cpShowDepth", "cpDofMax"],
-            samplers: ["cpBloom", "cpShafts", "cpDepth", "cpDof"],
+            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight", "cpVignette", "cpShowDepth", "cpDofMax", "cpCamPos", "cpCamRight", "cpCamUp", "cpCamFwd", "cpHeat", "sbSubOrigin", "sbSubExtent", "sbSubSize", "sbSubFade"],
+            samplers: ["cpBloom", "cpShafts", "cpDepth", "cpDof", "sbFireTex", "sbSubTex"],
             size: 1.0,
         });
         // AFTER the composite, and 8-bit rather than half-float on purpose: what the
@@ -351,12 +365,32 @@ export class Post {
             // radial gradient that looks the same at every focal length.
             const vignette = (this._settings.v["post.vignette"] as boolean) ? (this._settings.v["post.vignetteAmount"] as number) : 0;
             effect.setFloat3("cpVignette", vignette, Math.tan(this._camera.fov * 0.5), this._composite.aspectRatio);
+
+            // The camera basis, so the composite can turn a pixel and a distance back into
+            // a world point. Babylon's world matrix rows ARE the basis vectors.
+            const wm = this._camera.getWorldMatrix().m;
+            effect.setFloat3("cpCamRight", wm[0], wm[1], wm[2]);
+            effect.setFloat3("cpCamUp", wm[4], wm[5], wm[6]);
+            effect.setFloat3("cpCamFwd", wm[8], wm[9], wm[10]);
+            const cp = this._camera.globalPosition;
+            effect.setFloat3("cpCamPos", cp.x, cp.y, cp.z);
             // The depth buffer, shown raw when asked for. Bound to the scene otherwise, so
             // the sampler always points at something legal.
             const hasDepth = this._depth !== null && this._depth.enabled;
             effect.setFloat("cpShowDepth", hasDepth && this._settings.v["debug.view"] === "depthBuffer" ? 1 : 0);
             if (hasDepth) effect.setTexture("cpDepth", this._depth!.target);
             else effect.setTextureFromPostProcess("cpDepth", this._first);
+// Needs a depth buffer to find the world point and a fire to read; without
+            // either there is nothing to refract through.
+            const heat = hasDepth && this._fire !== null && (this._settings.v["post.heatDistortion"] as boolean) ? 1 : 0;
+            effect.setFloat2("cpHeat", heat, this._time);
+            if (this._fire !== null) this._fire.bindTo(effect);
+            if (this._window !== null) {
+                this._window.pushTo(effect);
+                // Every frame: the buffer ping-pongs, so a binding taken once would alias
+                // whichever half is currently being written.
+                this._window.bindTo(effect);
+            }
             if (this._dofAttached) {
                 effect.setTextureFromPostProcessOutput("cpDof", this._dof);
                 effect.setFloat("cpDofMax", DOF_MAX_COC);
@@ -517,6 +551,18 @@ export class Post {
     }
 
     /** The depth pass, once it exists. Built after this one, because it needs the meshes. */
+    /**
+     * The heat field the shimmer refracts through, and the window it is stored in.
+     *
+     * Taken as two narrow interfaces rather than as Fire and Substrate: the composite needs
+     * one texture and four numbers, and nothing about this pass should have an opinion on
+     * combustion.
+     */
+    setHeat(fire: HeatSource, window: HeatWindow): void {
+        this._fire = fire;
+        this._window = window;
+    }
+
     setDepth(depth: Depth): void {
         this._depth = depth;
         // AND RESYNC. Depth of field cannot be in the chain until there is a depth buffer

@@ -11,6 +11,12 @@
 // in that space, and the curve runs once, here, at the end.
 
 #include<substrateTonemap>
+// substrateBuffer, not substrateParams: sbFireAt needs the window fade, and the window
+// lives with the buffer. Which means this pass now has to bind sbSubTex whether it wants
+// it or not — an include that declares a texture obliges every shader including it to
+// bind that texture, the oldest trap in this project.
+#include<substrateBuffer>
+#include<substrateFireBuffer>
 
 varying vUV: vec2f;
 var textureSamplerSampler: sampler;
@@ -51,9 +57,53 @@ var cpDof: texture_2d<f32>;
 /// The widest circle of confusion the gather chased. Zero when depth of field is off.
 uniform cpDofMax: f32;
 
+/// Camera basis and position, for turning a pixel back into a world point. The ray is all
+/// the depth buffer needs to become geometry: it stores distance ALONG this ray, so the
+/// world point is simply the camera plus the direction times the number in the texture —
+/// no inverse projection, no matrix per pixel.
+uniform cpCamPos: vec3f;
+uniform cpCamRight: vec3f;
+uniform cpCamUp: vec3f;
+uniform cpCamFwd: vec3f;
+
+/// x: heat distortion strength, 0 off. y: simulation seconds.
+uniform cpHeat: vec2f;
+
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
-    var scene = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+    // HEAT SHIMMER, AND IT IS A REFRACTION, NOT AN OVERLAY. Hot air is less dense and so
+    // has a lower refractive index; a ray crossing it bends. Nothing is drawn — the frame
+    // is simply READ from slightly the wrong place, which is exactly what the eye does
+    // when it looks over a fire. That is why this happens before every other sample below
+    // rather than being blended on top: the bloom and the shafts should be displaced with
+    // the image, because they are part of the image the bent ray arrives from.
+    //
+    // The world point comes from the depth buffer for free. It stores distance ALONG the
+    // view ray, so `camera + direction * distance` is the hit point — no inverse
+    // projection anywhere. Sampling the heat field THERE rather than at the pixel is what
+    // makes the shimmer sit on the fire instead of floating in screen space.
+    var uv = input.vUV;
+    if (uniforms.cpHeat.x > 0.0) {
+        let ndc = input.vUV * 2.0 - vec2f(1.0);
+        let dir = normalize(uniforms.cpCamFwd + uniforms.cpCamRight * (ndc.x * uniforms.cpVignette.y * uniforms.cpVignette.z) + uniforms.cpCamUp * (ndc.y * uniforms.cpVignette.y));
+        let dist = min(textureSample(cpDepth, cpDepthSampler, input.vUV).r, 400.0);
+        let world = uniforms.cpCamPos + dir * dist;
+        let fire = sbFireAt(world.xz);
+        if (fire.heat > 0.0) {
+            // Two scrolling waves at different rates, so the pattern never repeats
+            // visibly. Rising, because hot air does: the vertical term scrolls upward and
+            // the horizontal one only wanders.
+            let t = uniforms.cpHeat.y;
+            let w1 = sin(world.x * 5.3 + world.z * 3.1 - t * 3.7);
+            let w2 = sin(world.z * 6.7 - world.x * 2.3 - t * 5.1);
+            // Falls off with distance in SCREEN terms: the same bend in the air subtends a
+            // smaller angle the further away the air is.
+            let shrink = 1.0 / (1.0 + dist * 0.05);
+            uv = uv + vec2f(w1, w2 + 0.6) * (fire.heat * uniforms.cpHeat.x * 0.02 * shrink);
+        }
+    }
+
+    var scene = textureSample(textureSampler, textureSamplerSampler, uv);
 
     // THE DEPTH BUFFER, SHOWN THROUGH THE SAME RAMP THE TERRAIN USES FOR ITS OWN
     // linearDepth VIEW. That is the entire point of this branch: the terrain computes
@@ -84,7 +134,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // copy of it across itself would soften exactly the per-texel structure those views
     // exist to show. The weight is the frame's own answer to "is this light", so both the
     // curve and the glare ask it.
-    let bloom = textureSample(cpBloom, cpBloomSampler, input.vUV).rgb;
+    let bloom = textureSample(cpBloom, cpBloomSampler, uv).rgb;
     let glare = uniforms.cpBloomWeight * saturate(scene.a);
     scene = vec4f(mix(scene.rgb, bloom, glare), scene.a);
 
@@ -93,7 +143,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // redistributed radiance, and it arrives BEFORE the tonemap so a bright shaft rolls
     // off on the same curve as a bright anything else. Gated by the same class weight —
     // a debug view is not air and nothing scatters through it.
-    let shafts = textureSample(cpShafts, cpShaftsSampler, input.vUV).rgb;
+    let shafts = textureSample(cpShafts, cpShaftsSampler, uv).rgb;
     scene = vec4f(scene.rgb + shafts * (uniforms.cpShaftWeight * saturate(scene.a)), scene.a);
 
     // VIGNETTE, BEFORE THE CURVE, BECAUSE IT IS A LENS AND NOT A LOOK. Less light reaches
@@ -143,7 +193,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // spreads its RADIANCE over a disc, and averaging display values instead would make
     // bokeh from a bright specular come out grey rather than bright.
     if (uniforms.cpDofMax > 0.0) {
-        let defocused = textureSample(cpDof, cpDofSampler, input.vUV);
+        let defocused = textureSample(cpDof, cpDofSampler, uv);
         // Two pixels of circle of confusion is where a blur becomes visible at all; the
         // ramp to four keeps the transition out of the focus plane from being a hard ring.
         let blend = smoothstep(2.0, 4.0, defocused.a);

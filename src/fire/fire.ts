@@ -2,7 +2,6 @@ import { ProceduralTexture } from "@babylonjs/core/Materials/Textures/Procedural
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import { Constants } from "@babylonjs/core/Engines/constants";
 import { Vector4 } from "@babylonjs/core/Maths/math.vector";
-import type { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import type { Scene } from "@babylonjs/core/scene";
 import type { WebGPUPerfCounter } from "@babylonjs/core/Engines/WebGPU/webgpuPerfCounter";
 import type { Settings } from "../core/settings";
@@ -29,6 +28,11 @@ import stepSource from "../shaders/fireStep.fragment.wgsl?raw";
  *
  * Allocation-free after construction.
  */
+
+/** Anything with the setter shape — a ShaderMaterial, or a post process Effect. */
+export interface FireTarget {
+    setTexture(name: string, texture: ProceduralTexture): unknown;
+}
 
 export const FIRE_SAMPLERS = ["sbFireTex"] as const;
 
@@ -144,8 +148,14 @@ export class Fire {
         this._clear();
     }
 
-    /** Point a material's fire sampler at the current front buffer. Every frame. */
-    bindTo(material: ShaderMaterial): void {
+    /**
+     * Point a target's fire sampler at the current front buffer. Every frame.
+     *
+     * Structural rather than ShaderMaterial, the same shape SubstrateTarget uses, because
+     * Phase 9's composite is a post process and a post process binds through an Effect.
+     * Both have the setter; neither has the other's class.
+     */
+    bindTo(material: FireTarget): void {
         material.setTexture("sbFireTex", this._targets[this._front]);
     }
 
