@@ -391,15 +391,37 @@ if (argv.has("throw")) {
 // has no representation in the world, and therefore the only one whose readout has to be
 // checked by reading the overlay rather than by looking at the ground.
 if (argv.has("gatherFor")) {
+    // Ground height at the aim point BEFORE anything is dug, so the hole can be measured
+    // rather than eyeballed.
+    await page.evaluate(() => {
+        const a = window.__substrate;
+        window.__digBefore = a.gait.groundAt(a.verbs.target.x, a.verbs.target.z);
+    });
     await page.keyboard.down("q");
     await page.waitForTimeout(Number(argv.get("gatherFor")) || 500);
     await page.keyboard.up("q");
     await page.waitForTimeout(150);
     const v = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll(".sb-sec *")).map((e) => e.textContent ?? "");
-        return { carried: window.__substrate.verbs.carried, row: rows.find((t) => t.includes("/") && t.includes("L")) ?? "(not rendered)" };
+        const a = window.__substrate;
+        return {
+            carried: a.verbs.carried,
+            row: rows.find((t) => t.includes("/") && t.includes("L")) ?? "(not rendered)",
+            // How deep the hole actually got, measured through the same ground query the
+            // character stands on — so this is the surface the game believes in, not the
+            // buffer's own idea of itself.
+            hole: window.__digBefore - a.gait.groundAt(a.verbs.target.x, a.verbs.target.z),
+            radius: a.settings.get("play.digRadius"),
+        };
     });
-    console.log(`verbs: carrying ${(v.carried * 1000).toFixed(0)} L, overlay reads "${v.row}"`);
+    // The closed form the scoop kernel is built on: a Gaussian of radius r carrying
+    // `volume` peaks at volume / (pi * r^2). If the ground has not moved by about that
+    // much, the geometry is not being displaced and the verb only looks like it works.
+    const want = v.carried / (Math.PI * v.radius * v.radius);
+    console.log(
+        `verbs: carrying ${(v.carried * 1000).toFixed(0)} L, overlay reads "${v.row}"; ` +
+            `hole ${(v.hole * 100).toFixed(1)} cm deep vs ${(want * 100).toFixed(1)} cm predicted`,
+    );
 }
 
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
