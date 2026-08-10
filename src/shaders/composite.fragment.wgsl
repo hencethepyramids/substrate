@@ -44,6 +44,13 @@ var cpDepth: texture_2d<f32>;
 /// Non-zero shows the depth buffer instead of the frame.
 uniform cpShowDepth: f32;
 
+/// The defocused image at half resolution, with its circle of confusion in alpha.
+var cpDofSampler: sampler;
+var cpDof: texture_2d<f32>;
+
+/// The widest circle of confusion the gather chased. Zero when depth of field is off.
+uniform cpDofMax: f32;
+
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
     var scene = textureSample(textureSampler, textureSamplerSampler, input.vUV);
@@ -127,6 +134,22 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     // showing a raw quantity writes 0 and arrives at the backbuffer untouched. Saturated
     // because additive blending pushes alpha past 1 and an unclamped mix would then
     // extrapolate past the tonemapped colour instead of landing on it.
+    // DEPTH OF FIELD, blended by how defocused this pixel actually is. The gather pass
+    // carries its circle of confusion in alpha, so a pixel at the focus distance takes
+    // none of it and one well outside takes all of it — no depth comparison here, because
+    // the lens already answered that question in units of pixels.
+    //
+    // Before the tonemap, like everything else that is optical: a defocused highlight
+    // spreads its RADIANCE over a disc, and averaging display values instead would make
+    // bokeh from a bright specular come out grey rather than bright.
+    if (uniforms.cpDofMax > 0.0) {
+        let defocused = textureSample(cpDof, cpDofSampler, input.vUV);
+        // Two pixels of circle of confusion is where a blur becomes visible at all; the
+        // ramp to four keeps the transition out of the focus plane from being a hard ring.
+        let blend = smoothstep(2.0, 4.0, defocused.a);
+        scene = vec4f(mix(scene.rgb, defocused.rgb, blend * saturate(scene.a)), scene.a);
+    }
+
     let mapped = sbDisplay(scene.rgb);
     fragmentOutputs.color = vec4f(mix(scene.rgb, mapped, saturate(scene.a)), 1.0);
 }

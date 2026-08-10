@@ -376,8 +376,14 @@ async function boot(): Promise<void> {
         embers.update(rig.camera, simDt);
         // After the wake that made the loose mass it reads.
         spray.update(rig.camera, mover, simDt);
-        // Simulation time, so the grain freezes with everything else when paused.
-        post.update(simDt);
+        // Simulation time for the grain, and the subject distance for the lens. Focusing
+        // on the character is what a camera operator would do, and it means the one thing
+        // the player is looking at is the one thing that is sharp.
+        const cam = rig.camera.globalPosition;
+        const fx = mover.position.x - cam.x;
+        const fy = mover.position.y + 0.9 - cam.y;
+        const fz = mover.position.z - cam.z;
+        post.update(simDt, Math.sqrt(fx * fx + fy * fy + fz * fz));
         perf.end(S_SUBSTRATE);
 
         perf.begin(S_UNIFORMS);

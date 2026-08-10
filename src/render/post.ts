@@ -12,6 +12,7 @@ import composite from "../shaders/composite.fragment.wgsl?raw";
 import bloomDown from "../shaders/bloomDown.fragment.wgsl?raw";
 import bloomUp from "../shaders/bloomUp.fragment.wgsl?raw";
 import godrays from "../shaders/godrays.fragment.wgsl?raw";
+import dof from "../shaders/dof.fragment.wgsl?raw";
 import finish from "../shaders/finish.fragment.wgsl?raw";
 
 /**
@@ -58,8 +59,16 @@ import finish from "../shaders/finish.fragment.wgsl?raw";
  * Filing them by convenience instead would have put all three in one place and made two
  * of them wrong.
  *
- * WHAT IS NOT HERE YET: DoF, SSR, heat distortion, TAA. The first two want real depth,
- * which is the point where a depth buffer has to earn its cost.
+ * PASS F — DEPTH OF FIELD, the first consumer of pass E's depth buffer. A real thin-lens
+ * circle of confusion, gathered as scatter-as-gather. It also settled a question worth
+ * recording: at this field of view the lens is 21 mm, and a 21 mm lens focused at six
+ * metres puts the horizon 0.88 pixels out of focus. Third-person cameras have deep focus.
+ * The exaggeration that makes the effect visible is therefore a named slider rather than a
+ * constant hidden in the maths.
+ *
+ * WHAT IS NOT HERE YET: SSR, heat distortion, TAA. TAA is blocked on history: Babylon's
+ * own implementation ping-pongs its history AS its output, which the frame graph supports
+ * and the classic post-process chain does not expose. That needs a mechanism, not a hack.
  */
 
 /**
@@ -98,6 +107,14 @@ const SHAFT_DENSITY = 0.85;
 const SHAFT_DECAY = 0.97;
 
 /**
+ * The widest circle of confusion the gather will chase, in pixels of the half-resolution
+ * buffer. The cost is a disc of this radius per pixel, so it is a quality-versus-time dial
+ * rather than a look: past it, everything simply shares the same maximum blur, which is
+ * also what a real lens does once a subject is far enough past focus.
+ */
+const DOF_MAX_COC = 16;
+
+/**
  * Ceiling on a single shaft tap, in scene-referred units at exposure 0.
  *
  * The sky near a low sun runs to a few tens; the sun disc itself runs to about 59,000,
@@ -129,6 +146,7 @@ export class Post {
     private readonly _up: PostProcess[] = [];
     private readonly _shafts: PostProcess;
     private readonly _finish: PostProcess;
+    private readonly _dof: PostProcess;
     private readonly _sky: Sky;
     private _depth: Depth | null = null;
     private readonly _disposers: (() => void)[] = [];
@@ -139,6 +157,9 @@ export class Post {
     private _first!: PostProcess;
     private _shaftsAttached = true;
     private _finishAttached = true;
+    private _dofAttached = true;
+    /** Where the lens is focused this frame, in metres. Set from outside. */
+    private _focus = 10;
     /** Simulation seconds. Drives the grain, so a paused frame has a still grain. */
     private _time = 0;
     private _sunU = 0.5;
@@ -152,12 +173,12 @@ export class Post {
 
     /** True once every pass in the chain has actually compiled. */
     get compiled(): boolean {
-        return this._composite.isReady() && this._shafts.isReady() && this._finish.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
+        return this._composite.isReady() && this._shafts.isReady() && this._finish.isReady() && this._dof.isReady() && this._down.every((p) => p.isReady()) && this._up.every((p) => p.isReady());
     }
 
     /** Fullscreen passes currently in the chain. Cheap to read, and it is what costs. */
     get passes(): number {
-        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0) + (this._shaftsAttached ? 1 : 0) + (this._finishAttached ? 1 : 0);
+        return (this._attached ? 1 : 0) + (this._bloomAttached ? this._down.length + this._up.length : 0) + (this._shaftsAttached ? 1 : 0) + (this._finishAttached ? 1 : 0) + (this._dofAttached ? 1 : 0);
     }
 
     constructor(scene: Scene, settings: Settings, camera: Camera, sky: Sky) {
@@ -174,6 +195,7 @@ export class Post {
         ShaderStore.ShadersStoreWGSL["substrateBloomUpPixelShader"] = bloomUp;
         ShaderStore.ShadersStoreWGSL["substrateGodraysPixelShader"] = godrays;
         ShaderStore.ShadersStoreWGSL["substrateFinishPixelShader"] = finish;
+        ShaderStore.ShadersStoreWGSL["substrateDofPixelShader"] = dof;
 
         const engine = scene.getEngine();
         // EVERY PASS TAKES THE CAMERA AT CONSTRUCTION, and they are constructed in chain
@@ -253,10 +275,49 @@ export class Post {
             effect.setFloat4("gsParams", SHAFT_DENSITY, SHAFT_DECAY, SHAFT_CEILING * 2 ** (this._settings.v["render.exposure"] as number), this._facing);
         };
 
+        // Half resolution. A circle of confusion smaller than two pixels is not a blur
+        // anyone can see, and one larger than that survives the halving intact — so the
+        // only detail this loses is detail the effect was about to destroy anyway.
+        this._dof = new PostProcess("substrateDof", "substrateDof", {
+            ...common,
+            uniforms: ["dfLens", "dfTexel", "dfCeiling"],
+            samplers: ["dfDepth"],
+            size: 0.5,
+        });
+        this._dof.externalTextureSamplerBinding = true;
+        this._dof.onApply = (effect) => {
+            effect.setTextureFromPostProcess("textureSampler", this._first);
+            if (this._depth !== null) effect.setTexture("dfDepth", this._depth.target);
+            effect.setFloat2("dfTexel", 1 / Math.max(this._dof.width, 1), 1 / Math.max(this._dof.height, 1));
+
+            // THE LENS, DERIVED RATHER THAN DIALLED. The focal length follows from the
+            // field of view and a full-frame sensor height, so a wider view really is a
+            // wider lens with more depth of field — which is the behaviour that makes this
+            // read as a camera rather than as a depth-keyed blur.
+            const sensorH = 0.024;
+            const f = sensorH * 0.5 / Math.tan(this._camera.fov * 0.5);
+            const aperture = f / (this._settings.v["post.dofAperture"] as number);
+            const focus = Math.max(this._focus, f * 1.01);
+            // Circle of confusion in metres on the sensor is this constant times |d-F|/d;
+            // converting to pixels of this buffer is one more scale.
+            // AN EXAGGERATION, NAMED AS ONE. The field of view implies a 21 mm lens, and
+            // a 21 mm lens focused at six metres puts the horizon 0.88 pixels out of focus
+            // — measured, not guessed. That is the truth about third-person cameras: they
+            // have deep focus, which is why games that want this look do not get it for
+            // free either. Everything above this line is the real thin-lens model and
+            // stays honest; this one multiplier is the departure, it has its own slider,
+            // and at 1 the effect is physically correct and invisible.
+            const strength = this._settings.v["post.dofStrength"] as number;
+            const perMetre = (strength * aperture * f) / Math.max(focus - f, 1e-4);
+            const toPixels = this._dof.height / sensorH;
+            effect.setFloat4("dfLens", focus, perMetre * toPixels, DOF_MAX_COC, f);
+            effect.setFloat("dfCeiling", BLOOM_CEILING * 2 ** (this._settings.v["render.exposure"] as number));
+        };
+
         this._composite = new PostProcess("substrateComposite", "substrateComposite", {
             ...common,
-            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight", "cpVignette", "cpShowDepth"],
-            samplers: ["cpBloom", "cpShafts", "cpDepth"],
+            uniforms: ["sbTonemapMode", "cpBloomWeight", "cpShaftWeight", "cpVignette", "cpShowDepth", "cpDofMax"],
+            samplers: ["cpBloom", "cpShafts", "cpDepth", "cpDof"],
             size: 1.0,
         });
         // AFTER the composite, and 8-bit rather than half-float on purpose: what the
@@ -296,6 +357,13 @@ export class Post {
             effect.setFloat("cpShowDepth", hasDepth && this._settings.v["debug.view"] === "depthBuffer" ? 1 : 0);
             if (hasDepth) effect.setTexture("cpDepth", this._depth!.target);
             else effect.setTextureFromPostProcess("cpDepth", this._first);
+            if (this._dofAttached) {
+                effect.setTextureFromPostProcessOutput("cpDof", this._dof);
+                effect.setFloat("cpDofMax", DOF_MAX_COC);
+            } else {
+                effect.setTextureFromPostProcess("cpDof", this._first);
+                effect.setFloat("cpDofMax", 0);
+            }
             // THE SCENE IS ALWAYS THE FIRST PASS'S INPUT, whatever the first pass turns
             // out to be. Babylon's automatic binding hands each pass the previous one's
             // OUTPUT, which for the composite is the top of the bloom pyramid — the one
@@ -332,6 +400,7 @@ export class Post {
         this._disposers.push(settings.on("post.godrays", () => this._sync()));
         this._disposers.push(settings.on("post.sharpen", () => this._sync()));
         this._disposers.push(settings.on("post.grain", () => this._sync()));
+        this._disposers.push(settings.on("post.dof", () => this._sync()));
         this._sync();
     }
 
@@ -390,16 +459,18 @@ export class Post {
         const wantPost = this._settings.v["sys.post"] as boolean;
         const wantBloom = wantPost && (this._settings.v["post.bloom"] as boolean);
         const wantShafts = wantPost && (this._settings.v["post.godrays"] as boolean);
+        const wantDof = wantPost && (this._settings.v["post.dof"] as boolean) && this._depth !== null && this._depth.enabled;
         // One pass for two toggles: either of them needs it, neither of them means it is
         // pure cost. The amounts still gate the work inside the shader.
         const wantFinish = wantPost && ((this._settings.v["post.sharpen"] as boolean) || (this._settings.v["post.grain"] as boolean));
-        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached || wantShafts !== this._shaftsAttached || wantFinish !== this._finishAttached;
+        const changed = wantPost !== this._attached || wantBloom !== this._bloomAttached || wantShafts !== this._shaftsAttached || wantFinish !== this._finishAttached || wantDof !== this._dofAttached;
 
         if (changed) {
             for (const pass of this._down) this._camera.detachPostProcess(pass);
             for (const pass of this._up) this._camera.detachPostProcess(pass);
             this._camera.detachPostProcess(this._shafts);
             this._camera.detachPostProcess(this._finish);
+            this._camera.detachPostProcess(this._dof);
             this._camera.detachPostProcess(this._composite);
         }
 
@@ -407,9 +478,10 @@ export class Post {
         this._bloomAttached = wantBloom;
         this._shaftsAttached = wantShafts;
         this._finishAttached = wantFinish;
+        this._dofAttached = wantDof;
         // The one texture everything downstream needs a handle on. Order of preference is
         // chain order, so this stays true as passes come and go.
-        this._first = wantBloom ? this._down[0] : wantShafts ? this._shafts : this._composite;
+        this._first = wantBloom ? this._down[0] : wantShafts ? this._shafts : wantDof ? this._dof : this._composite;
 
         // Unconditionally, even when the chain is unchanged: construction attaches
         // everything before this runs for the first time, so the very first call has
@@ -421,6 +493,7 @@ export class Post {
         for (const pass of this._up) pass.autoClear = false;
         this._shafts.autoClear = false;
         this._finish.autoClear = false;
+        this._dof.autoClear = false;
         this._composite.autoClear = false;
         this._first.autoClear = true;
         // Always explicit now: the composite names the scene through `_first` in every
@@ -438,6 +511,7 @@ export class Post {
         // irrelevant to this pass — it reads the scene explicitly — but it must be
         // somewhere, and here it is next to the thing that consumes it.
         if (wantShafts) this._camera.attachPostProcess(this._shafts);
+        if (wantDof) this._camera.attachPostProcess(this._dof);
         this._camera.attachPostProcess(this._composite);
         if (wantFinish) this._camera.attachPostProcess(this._finish);
     }
@@ -445,6 +519,10 @@ export class Post {
     /** The depth pass, once it exists. Built after this one, because it needs the meshes. */
     setDepth(depth: Depth): void {
         this._depth = depth;
+        // AND RESYNC. Depth of field cannot be in the chain until there is a depth buffer
+        // to read, so the constructor necessarily decided against it; without this line it
+        // never reconsiders, and the pass silently does nothing for the whole session.
+        this._sync();
     }
 
     /**
@@ -462,8 +540,12 @@ export class Post {
      * measurement in this phase: two captures of an identical build would differ, and the
      * pixel diff is the instrument that has caught every real Phase 9 bug.
      */
-    update(dt: number): void {
+    update(dt: number, focusDistance: number): void {
         this._time += dt;
+        // Zero means "focus on the subject", which is what a camera operator does. The
+        // setting overrides it for anyone who wants to rack focus by hand.
+        const manual = this._settings.v["post.dofFocus"] as number;
+        this._focus = manual > 0 ? manual : focusDistance;
     }
 
     async prepare(): Promise<void> {
@@ -497,6 +579,7 @@ export class Post {
         for (const pass of this._up) pass.dispose();
         this._shafts.dispose();
         this._finish.dispose();
+        this._dof.dispose();
         this._composite.dispose();
     }
 }
