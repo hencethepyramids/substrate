@@ -351,6 +351,42 @@ if (argv.has("packFor")) {
     console.log(`verbs: packed ${v.packed.toFixed(3)} at ${v.x.toFixed(2)}, ${v.z.toFixed(2)}`);
 }
 
+// GATHER, THROW, LAND. Two claims, and neither has a tuning constant in it: the volume
+// that left the hands has to be the volume that reaches the ground, and the heap has to
+// come down on the bearing it was thrown along. A projectile that loses its load, or one
+// launched along the wrong axis, fails one of them outright.
+if (argv.has("throw")) {
+    await page.keyboard.down("q");
+    await page.waitForTimeout(900);
+    await page.keyboard.up("q");
+    const before = await page.evaluate(() => ({
+        carried: window.__substrate.verbs.carried,
+        x: window.__substrate.mover.position.x,
+        z: window.__substrate.mover.position.z,
+        facing: window.__substrate.mover.facing,
+    }));
+    await page.keyboard.press("t");
+    // Long enough for the whole arc; the probe checks it actually came down.
+    await page.waitForTimeout(2000);
+    const v = await page.evaluate(() => ({
+        thrown: window.__substrate.verbs.thrown,
+        landed: window.__substrate.verbs.landed,
+        landings: window.__substrate.verbs.landings,
+        carried: window.__substrate.verbs.carried,
+        lx: window.__substrate.verbs.lastLanding.x,
+        lz: window.__substrate.verbs.lastLanding.z,
+    }));
+    const dx = v.lx - before.x;
+    const dz = v.lz - before.z;
+    const range = Math.hypot(dx, dz);
+    const off = Math.abs(((Math.atan2(dx, dz) - before.facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    const ok = v.landings === 1 && Math.abs(v.thrown - v.landed) < 1e-9 && v.carried === 0 && off < 1e-3;
+    console.log(
+        `verbs: threw ${v.thrown.toFixed(6)} m3, landed ${v.landed.toFixed(6)} m3 after ${range.toFixed(2)} m, ` +
+            `${v.landings} landing(s), bearing off facing by ${off.toFixed(6)} rad ${ok ? "(CONSERVED)" : "*** LOST IN FLIGHT ***"}`,
+    );
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 

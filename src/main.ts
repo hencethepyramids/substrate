@@ -168,7 +168,7 @@ async function boot(): Promise<void> {
 
         // Phase 10: the layer that lets the person holding the keyboard reach the
         // simulations the harness has been driving since Phase 6.
-        verbs = new Verbs(settings, fire, substrate);
+        verbs = new Verbs(settings, fire, substrate, gait);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);

@@ -17,6 +17,11 @@ export interface Ground {
     pack(x: number, z: number, radius: number, amount: number): void;
 }
 
+/** Ground height, for a thrown projectile to land on. */
+export interface Heights {
+    groundAt(x: number, z: number): number;
+}
+
 /** Where the player is and which way they are pointed. */
 export interface Actor {
     readonly position: { x: number; y: number; z: number };
@@ -50,6 +55,12 @@ export interface Actor {
  * stance width in, and taking it from there rather than deriving it again is deliberate —
  * two definitions of forward is how a character ends up lighting fires beside itself.
  */
+/** Projectiles allowed in the air at once. A pair of hands cannot outrun this. */
+const MAX_THROWN = 8;
+
+/** Release height above the character's feet, in metres - roughly the shoulder. */
+const THROW_HEIGHT = 1.35;
+
 export class Verbs {
     /** Where the next verb will land. Read by the harness; a reticle would draw here. */
     readonly target = { x: 0, z: 0 };
@@ -74,17 +85,33 @@ export class Verbs {
     /** Running totals, so a probe can check the two halves against each other. */
     gathered = 0;
     placed = 0;
-    /** Compaction applied, for a probe. Not conserved — packing moves nothing. */
+    /** Compaction applied, for a probe. Not conserved - packing moves nothing. */
     packed = 0;
+    /** Thrown and landed volume, which must end equal. See _step below. */
+    thrown = 0;
+    landed = 0;
+    landings = 0;
+    /** Where the last throw came down, for a probe to check its bearing against facing. */
+    readonly lastLanding = { x: 0, z: 0 };
 
     private readonly _settings: Settings;
     private readonly _fire: Igniter;
     private readonly _ground: Ground;
+    private readonly _heights: Heights;
+    /**
+     * Projectiles in flight: x, y, z, vx, vy, vz, volume - seven floats each, in one flat
+     * array allocated once (Rule 1). Eight is far more than a pair of hands can put in the
+     * air, and a full buffer drops the throw rather than growing, so a stuck projectile can
+     * never become an unbounded allocation.
+     */
+    private readonly _flight = new Float32Array(MAX_THROWN * 7);
+    private _inFlight = 0;
 
-    constructor(settings: Settings, fire: Igniter, ground: Ground) {
+    constructor(settings: Settings, fire: Igniter, ground: Ground, heights: Heights) {
         this._settings = settings;
         this._fire = fire;
         this._ground = ground;
+        this._heights = heights;
     }
 
     /**
@@ -100,6 +127,33 @@ export class Verbs {
         this.target.z = actor.position.z + Math.cos(actor.facing) * reach;
 
         if (!(this._settings.v["sys.verbs"] as boolean)) return;
+
+        // THROWN MATERIAL IS STILL THE PLAYER'S MATERIAL until it lands. The volume leaves
+        // `carried` at the moment of release and does not reach the ground until impact, so
+        // for the length of the flight it is in neither place - which is why the projectile
+        // carries the number rather than the deposit being scheduled up front. It also
+        // means the books balance at every instant rather than only at the end: interrupt
+        // the session mid-flight and the missing volume is accounted for, in the air.
+        if (input.throwIt && this.carried > 0 && this._inFlight < MAX_THROWN) {
+            const speed = this._settings.v["play.throwSpeed"] as number;
+            const angle = ((this._settings.v["play.throwAngle"] as number) * Math.PI) / 180;
+            const fx = Math.sin(actor.facing);
+            const fz = Math.cos(actor.facing);
+            const i = this._inFlight * 7;
+            // Released at about shoulder height, ahead of the chest rather than inside it.
+            this._flight[i] = actor.position.x + fx * 0.35;
+            this._flight[i + 1] = actor.position.y + THROW_HEIGHT;
+            this._flight[i + 2] = actor.position.z + fz * 0.35;
+            const horizontal = Math.cos(angle) * speed;
+            this._flight[i + 3] = fx * horizontal;
+            this._flight[i + 4] = Math.sin(angle) * speed;
+            this._flight[i + 5] = fz * horizontal;
+            this._flight[i + 6] = this.carried;
+            this._inFlight++;
+            this.thrown += this.carried;
+            this.carried = 0;
+        }
+        this._step(dt);
 
         if (input.ignite) {
             // The same radius and rate the harness has been using since Phase 6, so a fire
@@ -143,6 +197,54 @@ export class Verbs {
                 this.carried -= give;
                 this.placed += give;
             }
+        }
+    }
+
+    /**
+     * Advance everything in the air and land whatever has arrived.
+     *
+     * Plain forward Euler under gravity, and it is worth saying why that is enough rather
+     * than reaching for something better: the flight lasts under a second, drag is not
+     * modelled, and the only quantity anything downstream reads is WHERE it lands. A
+     * smarter integrator would move that by centimetres and change nothing else. The step
+     * is clamped for the reason every other simulation here clamps - a hitch has to slow
+     * the world, not teleport a snowball through the ground.
+     *
+     * Landing is a CROSSING rather than a proximity test. At 9 m/s a frame covers 15 cm, so
+     * "close to the ground" would be missed outright on a fast descent and the projectile
+     * would sail on underground forever, taking its volume with it and quietly breaking
+     * conservation. Asking whether it is now below the surface cannot miss.
+     */
+    private _step(dt: number): void {
+        const step = Math.min(dt, 1 / 30);
+        let i = 0;
+        while (i < this._inFlight) {
+            const o = i * 7;
+            this._flight[o + 4] -= 9.81 * step;
+            this._flight[o] += this._flight[o + 3] * step;
+            this._flight[o + 1] += this._flight[o + 4] * step;
+            this._flight[o + 2] += this._flight[o + 5] * step;
+
+            if (this._flight[o + 1] > this._heights.groundAt(this._flight[o], this._flight[o + 2])) {
+                i++;
+                continue;
+            }
+
+            // Arrived. What it was carrying becomes a heap exactly where it hit, through
+            // the same scoop() the hands use run in the deposit direction - so a thrown
+            // shovelful and a placed one are one operation and cannot drift apart.
+            const volume = this._flight[o + 6];
+            this._ground.scoop(this._flight[o], this._flight[o + 2], this._settings.v["play.throwRadius"] as number, -volume);
+            this.landed += volume;
+            this.landings++;
+            this.lastLanding.x = this._flight[o];
+            this.lastLanding.z = this._flight[o + 2];
+
+            // Swap the last entry into this slot rather than shifting the array down. The
+            // index is deliberately not advanced, so the entry just moved here is tested.
+            this._inFlight--;
+            const last = this._inFlight * 7;
+            for (let k = 0; k < 7; k++) this._flight[o + k] = this._flight[last + k];
         }
     }
 }

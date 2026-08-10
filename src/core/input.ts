@@ -45,6 +45,8 @@ export class Input {
     place = false;
     /** Held — tread the ground down. A rate, like the two above. */
     pack = false;
+    /** Pressed this frame - throw what is carried. An event, like ignite. */
+    throwIt = false;
     /** Accumulated mouse delta in raw pixels since the last endFrame(). */
     lookX = 0;
     lookY = 0;
@@ -64,6 +66,7 @@ export class Input {
             if (isTypingTarget(ev.target)) return;
             this._down.add(ev.code);
             if (ev.code === "KeyE" && !ev.repeat) this.ignite = true;
+            if (ev.code === "KeyT" && !ev.repeat) this.throwIt = true;
         });
         this._listen(window, "keyup", (e) => this._down.delete((e as KeyboardEvent).code));
         // A lost focus with keys held would otherwise leave the character sprinting forever.
@@ -163,6 +166,7 @@ export class Input {
         this.wheel = 0;
         // Verbs are consumed by the frame that saw them, like the deltas above.
         this.ignite = false;
+        this.throwIt = false;
     }
 
     dispose(): void {
