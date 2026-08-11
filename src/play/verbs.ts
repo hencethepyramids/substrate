@@ -15,6 +15,8 @@ export interface Igniter {
 export interface Ground {
     scoop(x: number, z: number, radius: number, volume: number): void;
     pack(x: number, z: number, radius: number, amount: number): void;
+    /** Volume-neutral: displaces material into a rim rather than creating it. */
+    stamp(x: number, z: number, radius: number, depth: number): void;
 }
 
 /** Ground height, for a thrown projectile to land on. */
@@ -87,6 +89,8 @@ export class Verbs {
     placed = 0;
     /** Compaction applied, for a probe. Not conserved - packing moves nothing. */
     packed = 0;
+    /** Metres of terrain commanded up or down. Displaced, never created. */
+    bent = 0;
     /** Thrown and landed volume, which must end equal. See _step below. */
     thrown = 0;
     landed = 0;
@@ -201,6 +205,44 @@ export class Verbs {
         // than their capacity and cannot give what they do not have — which is what keeps
         // `carried` inside [0, capacity] without a separate guard, and what makes a held key
         // stop rather than run negative.
+        // BENDING, AND IT IS A DIFFERENT GRAMMAR FROM THE FOUR VERBS BELOW IT.
+        //
+        // Gather, place, pack and throw are manual labour: material is picked up, carried
+        // in the hands, and put down somewhere else, and every one of them is bounded by
+        // what a person can hold. Bending is not that. The terrain moves because it is told
+        // to, the character never touches it, and there is no carry capacity because
+        // nothing is being carried.
+        //
+        // WHICH MAKES stamp() EXACTLY THE RIGHT PRIMITIVE, and it has been sitting there
+        // since Phase 3. Its kernel integrates to zero over the plane, so it DISPLACES
+        // material rather than creating it, and driving it with negative depth raises a
+        // mound instead of pressing a pit. No new substrate operation, no conservation
+        // bookkeeping, no shader work.
+        //
+        // WHERE THE MATERIAL COMES FROM IS NOT WHAT I FIRST WROTE HERE, and the probe
+        // caught it. The comment claimed a raised pillar leaves a scar ring around it that
+        // is the evidence of where the snow came from. Measured: the centre rose 83 cm and
+        // the ring did not move at all. The reason is in srStamped, which scales the rim by
+        // (1 - cohesion) - and snow is cohesive, so "the fraction that packs never becomes
+        // a rim". That is the line that separates a clean print in snow from a collapsing
+        // crater in dry sand, and it was written in Phase 3.
+        //
+        // So in snow, bending draws from COMPACTION rather than from the surroundings: the
+        // stamp also drives the compaction channel, and raising ground fluffs it back up -
+        // air pulled back in between the crystals, the exact inverse of treading it down.
+        // A pillar of snow is snow that got loftier, not snow stolen from a ring. In dry
+        // sand the same call will scar, because cohesion there is low, and neither
+        // behaviour is written here - both fall out of the element.
+        const bendRadius = this._settings.v["play.bendRadius"] as number;
+        const bend = (this._settings.v["play.bendRate"] as number) * dt;
+        if (input.raise) {
+            this._ground.stamp(this.target.x, this.target.z, bendRadius, -bend);
+            this.bent += bend;
+        } else if (input.lower) {
+            this._ground.stamp(this.target.x, this.target.z, bendRadius, bend);
+            this.bent += bend;
+        }
+
         const radius = this._settings.v["play.digRadius"] as number;
         const step = (this._settings.v["play.digRate"] as number) * dt;
         if (input.gather) {

@@ -45,6 +45,15 @@ export class Input {
     place = false;
     /** Held — tread the ground down. A rate, like the two above. */
     pack = false;
+    /**
+     * Held - command the ground up, or down.
+     *
+     * Rates, like the digging verbs, because terrain answers continuously rather than in
+     * discrete shovelfuls. These are the BENDING inputs and they are a different grammar
+     * from the carrying ones, not a variant of them.
+     */
+    raise = false;
+    lower = false;
     /** Pressed this frame - throw what is carried. An event, like ignite. */
     throwIt = false;
     /** Pressed this frame - leave the ground. */
@@ -160,6 +169,8 @@ export class Input {
         this.gather = this._down.has("KeyQ");
         this.place = this._down.has("KeyF");
         this.pack = this._down.has("KeyR");
+        this.raise = this._down.has("KeyC");
+        this.lower = this._down.has("KeyV");
     }
 
     /** Zero the accumulated deltas. Call at the bottom of the frame, after everything has read them. */

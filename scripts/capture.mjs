@@ -532,6 +532,33 @@ if (argv.has("leap")) {
     console.log(`leap: airborne ${air.up} at +${(air.y - base).toFixed(3)} m rising ${air.vy.toFixed(2)} m/s; landed ${!land.up}, ground now ${((land.ground - base) * 100).toFixed(1)} cm vs start`);
 }
 
+// BEND THE GROUND. Hold the raise key and measure what the terrain actually did, at the
+// point commanded and at the ring it drew from - because volume-neutral means both should
+// move, in opposite directions, and a pillar that rose out of nothing would be the bug.
+if (argv.has("bend")) {
+    const ms = Number(argv.get("bend")) || 900;
+    const before = await page.evaluate(() => {
+        const a = window.__substrate;
+        const t = a.verbs.target;
+        const r = a.settings.get("play.bendRadius");
+        return { c: a.gait.groundAt(t.x, t.z), rim: a.gait.groundAt(t.x + r * 1.22, t.z), x: t.x, z: t.z, r };
+    });
+    await page.keyboard.down(argv.get("bend") === "down" ? "v" : "c");
+    await page.waitForTimeout(ms);
+    await page.keyboard.up(argv.get("bend") === "down" ? "v" : "c");
+    await page.waitForTimeout(200);
+    const after = await page.evaluate((b) => {
+        const a = window.__substrate;
+        return { c: a.gait.groundAt(b.x, b.z), rim: a.gait.groundAt(b.x + b.r * 1.22, b.z), bent: a.verbs.bent };
+    }, before);
+    const centre = after.c - before.c;
+    const rim = after.rim - before.rim;
+    console.log(
+        `bend: centre ${(centre * 100).toFixed(1)} cm, rim ${(rim * 100).toFixed(1)} cm, commanded ${after.bent.toFixed(2)} m ` +
+            `${centre > 0.05 && rim < 0 ? "(RAISED, AND THE RING PAID FOR IT)" : "*** no displacement ***"}`,
+    );
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 
