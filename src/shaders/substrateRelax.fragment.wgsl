@@ -285,13 +285,22 @@ fn srStamped(state: vec4f, c: vec2i, worldXZ: vec2f) -> vec4f {
         // Signed into depression the same way everything else here is: a hollow where the
         // material left, standing proud where it arrived.
         t.x = t.x + lift - drop;
-        // MASS FOLLOWS THE MATERIAL, and the write-out clamp is doing real work on this line
-        // rather than papering over an overflow. Sweeping a drift consumes it, so the drift
-        // gets harder to sweep as it goes — that feedback is the whole point of the gate.
-        // Sweeping undisturbed ground lifts more than was ever loose there, the subtraction
-        // would run mass negative, and clamping at zero is the correct answer: that material
-        // was not lying around, it was mobilised, and it is loose now only where it landed.
-        t.y = t.y + drop - lift;
+        // MASS FOLLOWS THE MATERIAL. Sweeping a drift consumes it, so the drift gets harder
+        // to sweep as it goes — that feedback is the whole point of the gate. Sweeping
+        // undisturbed ground lifts more than was ever loose there, so the subtraction runs
+        // negative, and zero is the correct answer: that material was not lying around, it
+        // was mobilised, and it is loose only where it landed.
+        //
+        // CLAMPED HERE, NOT AT THE WRITE-OUT, and the first version of this line relied on
+        // the write-out clamp and was wrong for precisely the reason written six lines above
+        // it. srStamped() runs on all nine taps BEFORE the stencil, and srSlumpFlow limits
+        // its flow with `min(q, src.y * SR_MAX_SHARE)` — so a negative mass makes that min
+        // pick the negative number and the slump runs BACKWARDS even at dt = 0, where it is
+        // supposed to be identically zero. That flow is not antisymmetric, because each texel
+        // takes the terrain derivative at its own centre, so it does not cancel between the
+        // two ends of a pair: it quietly created 0.25% of everything a shove moved. The
+        // write-out clamp never saw any of it.
+        t.y = max(t.y + drop - lift, 0.0);
         return t;
     }
 

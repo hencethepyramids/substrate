@@ -1242,6 +1242,79 @@ Also honest: the crest is visibly scalloped in the snow shot. That is the sevent
 at 0.4 radii apart. Tightening the spacing smooths it and costs queue slots, and which way
 that trade should go is a question for whatever ends up standing behind the wall.
 
+### Pass E: what the ground has to give
+
+Until now a sweep carried bare ground as willingly as a drift. **The verb layer cannot ask
+that question** — `verbs.ts` picks where to sweep on the CPU a frame earlier and nothing
+there can see the buffer, so "move the drift and not the bedrock under it" is not a harder
+call to write up there, it is an impossible one. `srMobile()` makes it per texel in the
+relaxation, where the only code that knows what is lying on the ground lives.
+
+Two ways to be movable, and a shove takes the better. Loose material — the mass channel,
+what slump and deposits and settling air have left sitting proud — moves freely. Undisturbed
+ground still moves, because a bender who could only move what someone else had loosened
+would be a groundskeeper; it moves at `(1 - cohesion)`, the same split `srStamped` uses to
+decide whether a stamp throws a rim or packs. And `spCohesionAt` folds in **compaction**, so
+a patch trodden down with `R` resists being swept afterwards — an interaction between two
+verbs that neither of them mentions.
+
+Every expected value below is the element's own number, not one written into the probe:
+
+| | bare | loose |
+| --- | --- | --- |
+| snow, cohesion 0.82 | **18.0%** (element says 18%) | 100.0% |
+| desert, cohesion 0.02 | **98.0%** (element says 98%) | 100.0% |
+
+Bare desert moves **5.44×** what bare snow does through the identical call.
+
+**Gating the source forces a gather.** How much arrives at the sink is no longer a property
+of the sink — it belongs to a texel one displacement away, and a fragment shader cannot
+scatter. But the two lobes are the same Gaussian about two centres, so the sink lobe *is* the
+source lobe translated by the displacement: what arrives at p is what left p − displacement,
+and both ends read the same previous state. `shove()` now snaps the displacement to whole
+texels so that offset read is an exact copy rather than a filter, for the same reason the
+window's own scroll is snapped.
+
+`volume` therefore became an upper bound rather than a promise. What it never does is deliver
+more than it took.
+
+#### The bug this pass nearly shipped with
+
+The gate worked immediately and measured perfectly. It also quietly created **0.15% of
+everything a shove moved**, with the sign never flipping — and `sweep` is held, at sixty
+shoves a second. That is the exact failure `checkConserve.mjs` exists to catch, so it was
+committed to a branch rather than to `main` while it was chased.
+
+Four experiments found it, and three of them were eliminations:
+
+- **a control that took twenty steps with no shove at all** (fed by a far-corner scoop, whose
+  volume is known exactly and could be subtracted) drifted 1.6e-9 — so the step was innocent
+  and the shove owned it
+- **forcing mobility to a constant** left the error unchanged — so the gate was innocent
+- **a displacement already exactly 26 × 13 texels** left it unchanged — so the snap was
+  innocent
+- **the same probe against `main`'s original kernel** read 1.9e-10 on the identical geometry —
+  so the gather rewrite owned it, and pass A's 1e-15 had not been geometry luck
+
+That left one line. `t.y = t.y + drop - lift` runs mass negative at the source lobe, and
+`srSlumpFlow` limits its flow with `min(q, src.y * SR_MAX_SHARE)` — so a negative mass makes
+that `min` pick the negative number and **slump runs backwards even at `dt = 0`**, where it
+is supposed to be identically zero. That flow is not antisymmetric, because each texel takes
+the terrain derivative at its own centre, so it does not cancel between the two ends of a
+pair. The write-out clamp never saw any of it.
+
+The fix is `max(..., 0.0)` in `srStamped`, and the reason is written six lines above the bug
+in the same file: *"Clamped here rather than only at the end of the step: `srStamped()` is
+applied to all nine taps before the Laplacian is taken."* The pack branch learned this in
+Phase 10. I made the same mistake one branch down and the file had already warned me.
+
+| | before | after |
+| --- | --- | --- |
+| net after 1 shove | −2.37e-5 (−0.13%) | **1.5e-11** |
+| net after 20 shoves | −7.67e-4 (−0.21%) | **−3.3e-9** |
+
+1e-9 is the instrument's own floor — the scoop control sits at the same 1.6e-9.
+
 ### What the remaining phases are for
 
 Phases 0 to 9 built a world; 10 and 11 gave someone a way to act in it and a reason to. What
@@ -1256,11 +1329,9 @@ cheap — a moving stamp over time. The rest need something the substrate does n
 is DIRECTIONAL TRANSPORT: every operation so far is radially symmetric about a point, and
 moving material sideways is a genuinely new primitive rather than a new call.
 
-**All four of those moves now exist**, written up
-[below](#phase-12--the-bending-vocabulary) as passes A–D: the transport primitive, sweep and
-draw, the ridge, and the wall. What is left in this phase is not a move but a question — the
-sweep carries bare ground as willingly as a drift, and gating it on the loose-mass channel
-needs a decision the CPU cannot make.
+**Phase 12 is done.** All four moves exist and so does the question behind them, written up
+[below](#phase-12--the-bending-vocabulary) as passes A–E: the transport primitive, sweep and
+draw, the ridge, the wall, and the gate that decides how much the ground is willing to give.
 
 **Phase 13 — the bender's body.** Right now the earth moves and the character stands there.
 The gait solver from Phase 7 poses for walking, sprinting and sliding; it has nothing to say

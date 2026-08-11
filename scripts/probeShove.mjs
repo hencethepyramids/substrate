@@ -354,6 +354,29 @@ const result = await page.evaluate(async () => {
     // whether the total drifts twenty times as far as one does or stays put.
     app.settings.set("world.biome", "snow");
     await sleep(300);
+
+    // THE CONTROL, AND IT SHOULD HAVE BEEN THE FIRST THING RUN. The drift below grows with
+    // the number of SHOVES — but every shove is also a relaxation STEP, and the two are only
+    // distinguishable by taking steps without shoving. The relaxation pays whatever the
+    // airborne buffer says it owes on every step regardless of the timestep, and a debt too
+    // small to see at any one texel still integrates to real volume across a million of them.
+    //
+    // Steps only happen while something is queued, so the queue is fed from a far corner with
+    // a scoop — the one operation whose contribution is known exactly, being solved from the
+    // kernel's integral, so it can be subtracted rather than estimated.
+    app.substrate.reset();
+    await wait();
+    const CONTROL_VOL = 0.001;
+    const control = [];
+    for (let i = 1; i <= 20; i++) {
+        app.substrate.scoop(origin.x + extent * 0.06, origin.y + extent * 0.06, 0.5, CONTROL_VOL);
+        for (let k = 0; k < 3; k++) await wait();
+        if (i === 1 || i === 5 || i === 10 || i === 20) {
+            const m = reduce(await settle(), null, origin, flip);
+            control.push({ n: i, drift: m.net - i * CONTROL_VOL });
+        }
+    }
+
     app.substrate.reset();
     await wait();
     const compound = [];
@@ -368,7 +391,7 @@ const result = await page.evaluate(async () => {
         }
     }
 
-    return { size, extent, texel, origin, bearing, calibration, cases, verbs, gate, compound, sweptTotal: app.verbs.swept, steps: app.substrate.steps, dropped: app.substrate.dropped };
+    return { size, extent, texel, origin, bearing, calibration, cases, verbs, gate, control, compound, sweptTotal: app.verbs.swept, steps: app.substrate.steps, dropped: app.substrate.dropped };
 });
 
 await browser.close();
@@ -498,6 +521,12 @@ if (bare.length === 2 && bare[0].lifted > 1e-9) {
 
 console.log("");
 console.log("DOES IT COMPOUND? — twenty held shoves, which is a third of a second of sweeping");
+console.log("  CONTROL first: twenty steps with no shove at all, only a far-corner scoop to keep");
+console.log("  the queue fed. Any drift here belongs to the step, not to the shove.");
+for (const c of result.control) {
+    console.log(`    after ${String(c.n).padStart(2)}: ${c.drift.toExponential(2)} m3 unaccounted for`);
+}
+console.log("  now the shoves:");
 for (const c of result.compound) {
     console.log(`  after ${String(c.n).padStart(2)}: net ${c.net.toExponential(2)} m3 against ${c.lifted.toFixed(4)} m3 standing (${((c.net / Math.max(c.lifted, 1e-9)) * 100).toFixed(2)}%)`);
 }
@@ -507,8 +536,16 @@ if (result.compound.length >= 2) {
     // A BIASED error grows with the number of shoves; noise does not. Twenty shoves is
     // twenty times the opportunity, so a per-shove bias would show up as roughly twenty
     // times the first net rather than as the same number wandering.
-    const growth = Math.abs(last.net) / Math.max(Math.abs(first.net), 1e-12);
-    console.log(`  -> ${last.n}x the shoves moved the net by ${growth.toFixed(1)}x — a per-shove bias would be about ${last.n}x`);
+    // Only meaningful while the net is above the instrument's own floor — the scoop control
+    // above sits at 1e-9, so comparing two numbers below that is comparing noise to noise
+    // and would read as a wild multiple of nothing.
+    const floor = 1e-8;
+    if (Math.abs(last.net) > floor) {
+        const growth = Math.abs(last.net) / Math.max(Math.abs(first.net), 1e-12);
+        console.log(`  -> ${last.n}x the shoves moved the net by ${growth.toFixed(1)}x — a per-shove bias would be about ${last.n}x`);
+    } else {
+        console.log(`  -> still at the control's own floor after ${last.n} shoves: nothing is accumulating`);
+    }
     // THE THRESHOLD IS NOT A TASTE JUDGEMENT. checkConserve.mjs already fixed this
     // project's standard: material lost to an open boundary is a tuning matter, material
     // CREATED compounds and is a runaway. Pass A conserved to 1e-15 — fifteen orders
