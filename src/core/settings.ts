@@ -204,6 +204,9 @@ export const SCHEMA = {
     "render.fov": num({ group: "Render", label: "Field of view", def: 62, min: 40, max: 110, step: 1, unit: "deg" }),
 
     // -- Play ----------------------------------------------------------------
+    "char.jumpSpeed": num({ group: "Character", label: "Jump speed", def: 5.2, min: 1, max: 12, step: 0.1, unit: "m/s", hint: "Take-off speed. 5.2 m/s clears about 1.4 m, which is a standing leap by a fit person carrying nothing." }),
+    "char.airControl": num({ group: "Character", label: "Air control", def: 0.22, min: 0, max: 1, step: 0.01, hint: "Fraction of ground acceleration available in flight. A body in the air has nothing to push against; 0 is the honest answer and reads as a bug, so this is the concession." }),
+    "play.landImpact": num({ group: "Play", label: "Landing crater", def: 0.035, min: 0, max: 0.2, step: 0.005, unit: "m per m/s", hint: "How deep a landing punches into the ground, per metre per second of impact. The crater is a real volume-neutral stamp, so it heaps a rim like any other." }),
     "play.reach": num({ group: "Play", label: "Reach", def: 1.6, min: 0.5, max: 4, step: 0.1, unit: "m", hint: "How far in front of the character a verb lands. This is arm's length, not a cursor: a third-person camera has no cursor, and pointer lock is not available to a headless run." }),
 
     "play.digRadius": num({ group: "Play", label: "Dig radius", def: 0.55, min: 0.2, max: 2, step: 0.05, unit: "m" }),

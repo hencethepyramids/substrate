@@ -378,7 +378,16 @@ async function boot(): Promise<void> {
         // under its centre; the gait then plants each foot against the same surface
         // independently, which is what lets the two feet sit at different heights on a
         // slope and what lets a boot settle into the print it just made.
-        mover.position.y = gait.groundAt(mover.position.x, mover.position.z);
+        // THE LANDING PUNCHES A HOLE. A one-shot read: mover.landedAt carries the impact
+        // speed exactly once, so this fires on the frame of touchdown and never repeats.
+        // Scaled by speed because a drop off a ridge is not the same event as stepping off
+        // a kerb, and volume-neutral like every other stamp — the snow a landing displaces
+        // has to go somewhere, and it goes into the rim.
+        if (mover.landedAt > 0) {
+            const depth = mover.landedAt * (settings.v["play.landImpact"] as number);
+            if (depth > 0.01) substrate.stamp(mover.position.x, mover.position.z, settings.v["substrate.carveRadius"] as number, depth);
+            mover.landedAt = 0;
+        }
         // After the grounding, because character space is pinned to it, and before the
         // carve pass, which stamps the contacts this decides.
         gait.update(mover, simDt);

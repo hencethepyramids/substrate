@@ -517,6 +517,21 @@ if (argv.has("build")) {
     );
 }
 
+// A LEAP, measured. Airborne has to become true, the character has to actually rise, and
+// the landing has to punch a crater — three claims, none of which a screenshot settles.
+if (argv.has("leap")) {
+    const base = await page.evaluate(() => window.__substrate.mover.position.y);
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(120);
+    const air = await page.evaluate(() => ({ up: window.__substrate.mover.airborne, y: window.__substrate.mover.position.y, vy: window.__substrate.mover.velocityY }));
+    await page.waitForTimeout(1400);
+    const land = await page.evaluate(() => {
+        const a = window.__substrate;
+        return { up: a.mover.airborne, y: a.mover.position.y, ground: a.gait.groundAt(a.mover.position.x, a.mover.position.z) };
+    });
+    console.log(`leap: airborne ${air.up} at +${(air.y - base).toFixed(3)} m rising ${air.vy.toFixed(2)} m/s; landed ${!land.up}, ground now ${((land.ground - base) * 100).toFixed(1)} cm vs start`);
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 

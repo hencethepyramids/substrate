@@ -50,6 +50,25 @@ export class Mover {
     distance = 0;
     /** True while the slide input is held. The gait poses differently for it. */
     sliding = false;
+    /**
+     * Off the ground, and the reason the mover now owns its own Y.
+     *
+     * Through Phase 8 the character was GLUED to the surface: main.ts set position.y from
+     * the ground every frame and the mover was a purely horizontal solver. That is a fine
+     * model for walking and it makes a leap impossible, because there is no state in which
+     * the feet are somewhere the ground is not.
+     */
+    airborne = false;
+    /** Vertical speed in m/s. Only meaningful while airborne. */
+    velocityY = 0;
+    /**
+     * How hard the last landing was, in m/s downward, and zero once someone has read it.
+     *
+     * A one-shot rather than a flag, because what reads it wants the MAGNITUDE — the
+     * crater a landing punches should be a landing-sized crater, and a drop off a ridge is
+     * not the same event as stepping off a kerb.
+     */
+    landedAt = 0;
 
     private readonly _settings: Settings;
 
@@ -60,6 +79,15 @@ export class Mover {
     update(input: Input, rig: CameraRig, surface: Surface, dt: number): void {
         if (dt <= 0) return;
         const s = this._settings.v;
+
+        // Take off before anything else this frame, so the leap starts with the run-up's
+        // full horizontal speed rather than with whatever the ground steering leaves after
+        // a frame of drag. A jump that quietly costs you a metre of run-up feels wrong in a
+        // way players describe as "floaty" without being able to say why.
+        if (input.jump && !this.airborne) {
+            this.airborne = true;
+            this.velocityY = s["char.jumpSpeed"] as number;
+        }
 
         // The hill under the feet, measured on the surface that is actually drawn — so a
         // wake carved into a slope changes how the slope pushes back.
@@ -75,8 +103,18 @@ export class Mover {
         const wantX = rig.right.x * input.move.x + rig.forward.x * input.move.y;
         const wantZ = rig.right.z * input.move.x + rig.forward.z * input.move.y;
 
-        this.sliding = input.slide;
-        if (this.sliding) {
+        this.sliding = input.slide && !this.airborne;
+        if (this.airborne) {
+            // AIR CONTROL, DELIBERATELY POOR. A body in flight has nothing to push against;
+            // the only honest steering is what the limbs can do against their own inertia,
+            // which is very little. Keeping a fraction rather than zero is the concession —
+            // no control at all reads as a bug to anyone who has played anything else.
+            const air = (s["char.airControl"] as number) * (s["char.acceleration"] as number);
+            const target = s["char.walkSpeed"] * (input.sprint ? s["char.sprintMultiplier"] : 1);
+            const k = 1 - Math.exp(-air * dt);
+            this.velocity.x += (wantX * target - this.velocity.x) * k;
+            this.velocity.z += (wantZ * target - this.velocity.z) * k;
+        } else if (this.sliding) {
             // NO TARGET SPEED. The hill decides, the player only steers — which is the
             // entire difference between running down a dune and riding one.
             //
@@ -120,6 +158,25 @@ export class Mover {
 
         this.position.x += this.velocity.x * dt;
         this.position.z += this.velocity.z * dt;
+
+        // THE MOVER OWNS Y NOW. Ground-following used to happen in main.ts, which meant
+        // there was no frame in which the feet could be above the surface. Doing it here
+        // keeps the two cases in one place: airborne integrates, grounded snaps.
+        const ground = surface.groundAt(this.position.x, this.position.z);
+        if (this.airborne) {
+            this.velocityY -= G * dt;
+            this.position.y += this.velocityY * dt;
+            // Landing is a CROSSING, like the thrown load's — at 8 m/s down a frame covers
+            // 13 cm, and a proximity test would be stepped straight over.
+            if (this.position.y <= ground && this.velocityY <= 0) {
+                this.airborne = false;
+                this.position.y = ground;
+                this.landedAt = -this.velocityY;
+                this.velocityY = 0;
+            }
+        } else {
+            this.position.y = ground;
+        }
 
         const stepX = this.velocity.x * dt;
         const stepZ = this.velocity.z * dt;
