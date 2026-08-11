@@ -210,7 +210,66 @@ const result = await page.evaluate(async () => {
         });
     }
 
-    return { size, extent, texel, origin, bearing, calibration, cases, steps: app.substrate.steps, dropped: app.substrate.dropped };
+    // -- the verbs -------------------------------------------------------------------
+    //
+    // Pass A proved the substrate can carry material along a bearing. This asks the
+    // separate question pass B is responsible for: does the SWEEP hand it the bearing the
+    // character is actually facing?
+    //
+    // That wiring is the classic silent failure — forward is (sin, cos) of the facing angle
+    // here, and a shader, a gait and a camera rig in this project each have their own
+    // opinion about which way round that goes. Swap the pair or flip a sign and the verb
+    // still sweeps, still conserves, still reads 100% of its volume, and pushes the drift
+    // sideways instead of away from you. Nothing but a bearing measurement finds it.
+    //
+    // DRIVEN THROUGH THE REAL VERB LAYER WITH A SYNTHETIC ACTOR AND AN EXPLICIT dt, which
+    // is the whole trick here. The world stays paused, so the frame loop feeds the verbs a
+    // dt of zero and they do nothing; calling update() directly with a dt of our own runs
+    // the shipped code path — real settings, real reach, real facing convention — against a
+    // buffer that nothing else is touching. Verbs.update takes an Actor interface rather
+    // than the Mover for exactly this reason, so no character has to be moved to test it.
+    const idle = { ignite: false, gather: false, place: false, pack: false, raise: false, lower: false, pedestal: false, throwIt: false, sweep: false, draw: false };
+    const reach = app.settings.get("play.reach");
+    const sweepLen = app.settings.get("play.sweepDistance");
+    const verbs = [];
+    for (const heading of [0, 90, 180, 270, 35]) {
+        const facing = (heading * Math.PI) / 180;
+        // Deliberately NOT the window centre, and never the origin: a verb that ignored the
+        // actor's position entirely would land on the centre and look correct there.
+        const actor = { position: { x: midX + 1.7, y: 0, z: midZ - 1.1 }, facing, airborne: false };
+        const fwd = { x: Math.sin(facing), z: Math.cos(facing) };
+
+        for (const which of ["sweep", "draw"]) {
+            app.substrate.reset();
+            await wait();
+            app.verbs.update({ ...idle, [which]: true }, actor, 0.4);
+            const data = await settle();
+            const m = reduce(data, origin, flip);
+            if (m.source === null || m.sink === null) {
+                verbs.push({ heading, which, empty: true });
+                continue;
+            }
+            verbs.push({
+                heading,
+                which,
+                lifted: m.lifted,
+                net: m.net,
+                measured: Math.atan2(m.sink.z - m.source.z, m.sink.x - m.source.x),
+                // Away from the character for a sweep, back toward them for a draw.
+                expected: Math.atan2(which === "sweep" ? fwd.z : -fwd.z, which === "sweep" ? fwd.x : -fwd.x),
+                // THE MIDPOINT IS EXACT. The kernel is antisymmetric about its centre, so
+                // whatever the overlap does to each lobe's centre of mass it does equally to
+                // both, and the two centroids straddle the stamp centre exactly. Both verbs
+                // put that centre one reach plus half a throw ahead of the character —
+                // which is also what says the sweep started from the actor rather than from
+                // wherever the window happened to be.
+                mid: { x: (m.source.x + m.sink.x) * 0.5, z: (m.source.z + m.sink.z) * 0.5 },
+                wantMid: { x: actor.position.x + fwd.x * (reach + sweepLen * 0.5), z: actor.position.z + fwd.z * (reach + sweepLen * 0.5) },
+            });
+        }
+    }
+
+    return { size, extent, texel, origin, bearing, calibration, cases, verbs, sweptTotal: app.verbs.swept, steps: app.substrate.steps, dropped: app.substrate.dropped };
 });
 
 await browser.close();
@@ -294,6 +353,27 @@ for (const k of result.cases) {
         console.log(`  FAIL: something other than the shove is writing depression`);
         bad++;
     }
+}
+
+console.log("");
+console.log("THE VERBS — does the sweep carry material along the bearing the character faces?");
+console.log(`  ${result.sweptTotal.toFixed(3)} m3 swept in total across the headings below`);
+for (const v of result.verbs) {
+    if (v.empty) {
+        console.log(`  ${String(v.heading).padStart(3)} deg ${v.which.padEnd(5)}  FAIL: moved nothing at all`);
+        bad++;
+        continue;
+    }
+    let dAng = v.measured - v.expected;
+    while (dAng > Math.PI) dAng -= 2 * Math.PI;
+    while (dAng < -Math.PI) dAng += 2 * Math.PI;
+    const midErr = Math.hypot(v.mid.x - v.wantMid.x, v.mid.z - v.wantMid.z);
+    const ok = Math.abs(dAng) <= 0.02 && midErr <= result.texel * 3 && Math.abs(v.net) <= v.lifted * 0.01;
+    console.log(
+        `  ${String(v.heading).padStart(3)} deg ${v.which.padEnd(5)}  carried ${v.lifted.toFixed(4)} m3 along ${deg(v.measured).padStart(7)} deg ` +
+            `(wanted ${deg(v.expected).padStart(7)}, off ${deg(dAng).padStart(6)})   centre ${midErr < 0.01 ? "exact" : `${(midErr * 100).toFixed(1)} cm out`}   ${ok ? "ok" : "FAIL"}`,
+    );
+    if (!ok) bad++;
 }
 
 console.log("");

@@ -17,6 +17,8 @@ export interface Ground {
     pack(x: number, z: number, radius: number, amount: number): void;
     /** Volume-neutral: displaces material into a rim rather than creating it. */
     stamp(x: number, z: number, radius: number, depth: number): void;
+    /** Volume-neutral and DIRECTED: takes material from here and puts it down over there. */
+    shove(x: number, z: number, radius: number, dx: number, dz: number, volume: number): void;
 }
 
 /** Ground height, for a thrown projectile to land on. */
@@ -92,6 +94,8 @@ export class Verbs {
     packed = 0;
     /** Metres of terrain commanded up or down. Displaced, never created. */
     bent = 0;
+    /** Cubic metres carried sideways. Neither gained nor lost — see `shove`. */
+    swept = 0;
     /** Thrown and landed volume, which must end equal. See _step below. */
     thrown = 0;
     landed = 0;
@@ -242,6 +246,49 @@ export class Verbs {
         } else if (input.lower) {
             this._ground.stamp(this.target.x, this.target.z, bendRadius, bend);
             this.bent += bend;
+        }
+
+        // SWEEP AND DRAW — the first two verbs with a BEARING, and the reason Phase 12
+        // opened with a substrate change rather than with these.
+        //
+        // Raise, lower and pedestal all act on one spot: the ground in front of you goes up
+        // or down and the material comes from a ring around it. Nothing in that vocabulary
+        // can say "over there". A drift pushed aside is not a deeper stamp, it is material
+        // that ends up somewhere it did not start, and until shove() existed there was no
+        // operation in the substrate that could express it — every kernel was radially
+        // symmetric about a point.
+        //
+        // THE TWO ARE ONE CALL WITH THE VECTOR REVERSED, which is worth keeping visible.
+        // Sweeping takes the material at arm's length and carries it further out; drawing
+        // takes the material one throw beyond arm's length and carries it back to arm's
+        // length. Both leave the NEAR end of the transport at `reach`, so neither can dump a
+        // heap inside the character, and the pair is symmetric by construction rather than
+        // by two blocks of code that have to be kept agreeing.
+        //
+        // A RATE IN CUBIC METRES, like gather and place, and unlike raise and lower which
+        // are a rate in metres of depth. That is not an inconsistency — it follows from what
+        // is conserved. Bending commands a HEIGHT and the material sorts itself out; a sweep
+        // commands a VOLUME and the height follows from how far it is spread. Volume is also
+        // the only unit in which "the same amount arrived as left" is a statement worth
+        // making, and shove() makes it exactly.
+        //
+        // WHAT THIS CANNOT DO, stated because it will look like a bug the first time it is
+        // noticed: it sweeps bare ground exactly as willingly as it sweeps a drift. Moving
+        // only the LOOSE material would be the richer verb, and the substrate does track it
+        // in the mass channel — but the decision is made here, on the CPU, and nothing here
+        // can see the buffer. That is a GPU-side choice and a later pass.
+        const sweepDist = this._settings.v["play.sweepDistance"] as number;
+        const sweepVolume = (this._settings.v["play.sweepRate"] as number) * dt;
+        if (input.sweep || input.draw) {
+            const fx = Math.sin(actor.facing) * sweepDist;
+            const fz = Math.cos(actor.facing) * sweepDist;
+            const radius = this._settings.v["play.sweepRadius"] as number;
+            if (input.sweep) {
+                this._ground.shove(this.target.x, this.target.z, radius, fx, fz, sweepVolume);
+            } else {
+                this._ground.shove(this.target.x + fx, this.target.z + fz, radius, -fx, -fz, sweepVolume);
+            }
+            this.swept += sweepVolume;
         }
 
         // THE PEDESTAL: raise the ground under your own feet and ride it up.

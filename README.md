@@ -999,9 +999,15 @@ negative depth it raises instead of pressing.
 
 | | |
 | --- | --- |
+| `Z` | sweep — carry the material in front of you a further `play.sweepDistance` out |
+| `X` | draw — carry material from one throw beyond your reach back to arm's length |
 | `C` | raise the ground you are aiming at |
 | `V` | lower it |
 | `G` | pedestal — raise the ground under your own feet and ride it up |
+
+`Z` and `X` are Phase 12 and are a step beyond the three below them: raise, lower and
+pedestal act on one *spot*, and these two have a *bearing*. See
+[Phase 12](#phase-12--the-bending-vocabulary).
 
 The pedestal is worth describing because nothing implements it. The mover snaps to the
 surface every frame it is grounded, so when the surface rises the character rises with it;
@@ -1024,6 +1030,94 @@ cubic metres and solves for the amplitude from the kernel's closed-form integral
 makes conservation a property of the interface rather than something a probe has to measure
 afterwards.
 
+## Phase 12 — the bending vocabulary
+
+### Pass A: the substrate learns a direction
+
+Everything the substrate could do was radially symmetric about a point. `stamp` displaces
+outward into a rim, `scoop` lifts straight up, `pack` moves nothing — so between them they
+can raise ground, lower it, or hand it to whoever is holding it, and **none of them can
+carry it in a bearing**. A drift pushed aside is not a deeper stamp; it is material that
+ends up somewhere it did not start.
+
+`substrate.shove(x, z, radius, dx, dz, volume)` is that operation. The kernel is one
+Gaussian minus the same Gaussian somewhere else, which makes it odd about the bisector of
+the two and therefore exactly zero over the plane — volume-neutral like the bowl, but for a
+different reason worth keeping straight. The bowl conserves because its radial integral
+vanishes; this conserves because nothing is created even in principle.
+
+**The amplitude solve is not `scoop`'s, and assuming it was would have been a silent 48%
+shortfall** at the geometry a verb actually uses. Where the lobes overlap they cancel, so
+the material that crosses the bisector is `erf(|v| / radius)` of a Gaussian rather than all
+of it. The shove stays perfectly neutral while being short — it delivers everything it
+lifts, it just lifts less than you asked — so no conservation check anywhere could have
+caught it. Dividing that erf back out is what makes "move half a cubic metre" true at every
+displacement instead of only at long ones.
+
+[scripts/probeShove.mjs](scripts/probeShove.mjs) measures it on hardware, with the world
+paused so `dt` is zero and the stamp is the only thing that happens. It **calibrates the
+readback's row order against a scoop at a known point before trusting it** — this project
+has shipped a self-consistent mirror twice, and a shove that transports along +Z when told
++X passes every volume check ever written.
+
+| | long (4 radii) | short (1 radius) |
+| --- | --- | --- |
+| volume delivered | 100.00% | 100.00% |
+| net created | 3e-15 m³ | 8e-15 m³ |
+| bearing asked / measured | 26.57° / 26.57° | 26.57° / 26.57° |
+| stray depression outside the lobes | 2.7e-8 m | 2.3e-8 m |
+
+And one independent prediction, which is the line worth trusting most. The centroids do not
+sit at the two points named, and should not: cancellation across the bisector pushes each
+side's centre of mass outward to `len / erf(len / 2r)`. That is the kernel's **first**
+moment, where the amplitude solve is its zeroth, and nothing in the shipped code computes
+it — the shader has no erf in it and `substrate.ts` uses erf only to scale an amplitude. The
+model says 3.215 m and 2.305 m for displacements of 3.2 m and 1.2 m. The buffer reads
+3.215 m and 2.305 m.
+
+One bug found while writing it, and it is the kind this project keeps having. `srStamped`
+tested `srStampKind > 1.5` for compaction, which was correct while 2 was the highest kind
+there was and routed every shove into the pack branch the moment 3 existed — a branch that
+writes no depression at all. A shove would have looked exactly like a shove that did
+nothing. It is a band now.
+
+### Pass B: two verbs with a bearing
+
+`Z` sweeps and `X` draws, and they are **one call with the vector reversed**. Sweeping takes
+the material at arm's length and carries it further out; drawing takes material one throw
+beyond arm's length and carries it back. Both leave the near end of the transport at
+`play.reach`, so neither can dump a heap inside the character, and the pair is symmetric by
+construction rather than by two blocks of code that have to be kept agreeing.
+
+A rate in **cubic metres**, unlike raise and lower which are a rate in metres of depth. That
+is not an inconsistency, it follows from what is conserved: bending commands a height and
+the material sorts itself out, a sweep commands a volume and the height follows from how far
+it is spread.
+
+The probe drives the real verb layer with a synthetic actor and an explicit `dt` while the
+world stays paused — `Verbs.update` takes an `Actor` interface rather than the `Mover`
+precisely so this is possible, and it isolates the one thing pass B is responsible for:
+does the verb hand the substrate the bearing the character is actually facing? Forward is
+`(sin, cos)` of the facing angle, and a shader, a gait and a camera rig in this project each
+have their own opinion about which way round that goes. Swap the pair and the verb still
+sweeps, still conserves, still reads 100% of its volume, and pushes the drift sideways
+instead of away from you.
+
+Ten cases — sweep and draw at 0°, 90°, 180°, 270° and 35° — all carried 0.2200 m³ along the
+bearing asked to within 0.00°, with the transport's centre exact.
+
+[phase12-sweep-before.png](shots/phase12-sweep-before.png) and
+[phase12-sweep-snow.png](shots/phase12-sweep-snow.png) are the A/B: featureless snow, and
+then the same ground after 2.2 m³ has been swept along the facing — a hollow where the
+material left and a bank where it arrived, 2.2 m further out. Neither of those is drawn by
+anything; both are the same buffer the footprints are in.
+
+**What it deliberately does not do yet.** It sweeps bare ground exactly as willingly as it
+sweeps a drift. Moving only the *loose* material would be the richer verb, and the substrate
+does track it in the mass channel — but the decision is made in `verbs.ts`, on the CPU, and
+nothing there can see the buffer. That is a GPU-side choice and a later pass, and it is the
+most interesting thing left in this phase.
+
 ### What the remaining phases are for
 
 Phases 0 to 9 built a world; 10 and 11 gave someone a way to act in it and a reason to. What
@@ -1037,6 +1131,10 @@ aside, a wall thrown up along a line, material pulled toward you. Only the first
 cheap — a moving stamp over time. The rest need something the substrate does not have, which
 is DIRECTIONAL TRANSPORT: every operation so far is radially symmetric about a point, and
 moving material sideways is a genuinely new primitive rather than a new call.
+
+Passes A and B are done and are written up [below](#phase-12--the-bending-vocabulary). The
+primitive exists and two verbs use it; the ridge, the wall and the loose-material question
+are what is left.
 
 **Phase 13 — the bender's body.** Right now the earth moves and the character stands there.
 The gait solver from Phase 7 poses for walking, sprinting and sliding; it has nothing to say

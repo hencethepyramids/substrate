@@ -351,6 +351,37 @@ if (argv.has("packFor")) {
     console.log(`verbs: packed ${v.packed.toFixed(3)} at ${v.x.toFixed(2)}, ${v.z.toFixed(2)}`);
 }
 
+// CARRY MATERIAL SIDEWAYS. `--sweepFor=<ms>` holds Z, `--drawFor=<ms>` holds X, and the
+// pair is the first thing in this project that moves ground in a DIRECTION rather than
+// about a point. The picture to look for is two features rather than one: a hollow where
+// the material left and a ridge one throw further out where it arrived. A single crater
+// means the transport collapsed and the shove is behaving as a scoop.
+for (const [flag, key, name] of [
+    ["sweepFor", "z", "swept away"],
+    ["drawFor", "x", "drawn back"],
+]) {
+    if (!argv.has(flag)) continue;
+    await page.keyboard.down(key);
+    await page.waitForTimeout(Number(argv.get(flag)) || 1200);
+    await page.keyboard.up(key);
+    const v = await page.evaluate(() => ({
+        swept: window.__substrate.verbs.swept,
+        x: window.__substrate.verbs.target.x,
+        z: window.__substrate.verbs.target.z,
+        facing: window.__substrate.mover.facing,
+        dist: window.__substrate.settings.get("play.sweepDistance"),
+        dropped: window.__substrate.substrate.dropped,
+    }));
+    // Where the far end of the transport ended up, so the console says what the picture
+    // should show rather than leaving it to the eye.
+    const fx = Math.sin(v.facing) * v.dist;
+    const fz = Math.cos(v.facing) * v.dist;
+    console.log(
+        `verbs: ${v.swept.toFixed(4)} m3 ${name} from ${v.x.toFixed(2)}, ${v.z.toFixed(2)} ` +
+            `to ${(v.x + fx).toFixed(2)}, ${(v.z + fz).toFixed(2)} (${v.dist} m along facing), stamps dropped ${v.dropped}`,
+    );
+}
+
 // GATHER, THROW, LAND. Two claims, and neither has a tuning constant in it: the volume
 // that left the hands has to be the volume that reaches the ground, and the heap has to
 // come down on the bearing it was thrown along. A projectile that loses its load, or one

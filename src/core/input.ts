@@ -56,6 +56,16 @@ export class Input {
     lower = false;
     /** Held - raise the ground under your own feet and ride it. */
     pedestal = false;
+    /**
+     * Held - carry material sideways, away from you and back toward you.
+     *
+     * The bending verbs above act on ONE SPOT: they make the ground in front of you higher
+     * or lower and the material comes from directly around it. These two have a bearing.
+     * They are the first verbs that could not have been written before Phase 12, because
+     * until shove() existed the substrate had no way to express "over there".
+     */
+    sweep = false;
+    draw = false;
     /** Pressed this frame - throw what is carried. An event, like ignite. */
     throwIt = false;
     /** Pressed this frame - leave the ground. */
@@ -174,6 +184,10 @@ export class Input {
         this.raise = this._down.has("KeyC");
         this.lower = this._down.has("KeyV");
         this.pedestal = this._down.has("KeyG");
+        // Z X C V, left to right: carry away, carry back, raise, lower. One row, and the
+        // two that have a direction sit next to each other rather than next to the digging.
+        this.sweep = this._down.has("KeyZ");
+        this.draw = this._down.has("KeyX");
     }
 
     /** Zero the accumulated deltas. Call at the bottom of the frame, after everything has read them. */

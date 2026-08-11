@@ -94,3 +94,16 @@ Every animation defect this project has had was invisible in a single still.
 
 - `gait-walk-cycle.png` — 12 frames across one walk cycle, side on.
 - `gait-run-cycle.png` — 8 frames across one run cycle, with the spray trailing behind.
+
+## Phase 12
+
+- `phase12-sweep-before.png` / `phase12-sweep-snow.png` — snow, sun 12, viewed side-on so
+  the transport crosses the frame instead of running away from the camera. The first is the
+  control: featureless ground where the second has a hollow and, one throw further out, the
+  bank the material arrived in. 2.2 m³ carried along the character's facing by
+  `--sweepFor=4000`, which holds `Z` through the real input path.
+
+  The pair matters more than either frame. A shove that had quietly collapsed into a scoop
+  would dig the same hollow and heap nothing, and on this terrain a single frame of it would
+  still look plausible — the control is what says the bank is not a dune that was always
+  there.
