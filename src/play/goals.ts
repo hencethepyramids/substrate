@@ -41,10 +41,36 @@ export class Goals {
     /** True once `delivered` reaches the target. Latches; a mound is not un-built. */
     complete = false;
 
+    /**
+     * Told when something worth saying happens, rather than saying it.
+     *
+     * THE GOAL LAYER DOES NOT KNOW WHAT AN OVERLAY IS, and that is the same separation this
+     * file claims from the simulations one level down. It knows a site was founded and a
+     * mound was finished; whether that becomes a toast, a sound, or nothing at all is the
+     * caller's business. A rule that reached into the UI would be as tangled as a rule that
+     * reached into the substrate, just in the other direction.
+     *
+     * Fired once each. `complete` latches, so a mound is not un-built by the next deposit
+     * and the message does not repeat every frame the player keeps shovelling.
+     */
+    onFounded: ((x: number, z: number) => void) | null = null;
+    onComplete: ((litres: number) => void) | null = null;
+
     private readonly _settings: Settings;
 
     constructor(settings: Settings) {
         this._settings = settings;
+    }
+
+    /** Metres from a point to the current site, or -1 if there is no site yet. */
+    distanceFrom(x: number, z: number): number {
+        if (!this.started) return -1;
+        return Math.hypot(x - this.site.x, z - this.site.z);
+    }
+
+    /** How far a deposit may land from the site and still count. */
+    get siteRadius(): number {
+        return SITE_RADIUS;
     }
 
     /** Fraction of the target delivered, clamped to 1. */
@@ -70,6 +96,7 @@ export class Goals {
             this.started = true;
             this.site.x = x;
             this.site.z = z;
+            this.onFounded?.(x, z);
         }
 
         const dx = x - this.site.x;
@@ -80,7 +107,10 @@ export class Goals {
         }
 
         this.delivered += volume;
-        if (!this.complete && this.progress >= 1) this.complete = true;
+        if (!this.complete && this.progress >= 1) {
+            this.complete = true;
+            this.onComplete?.(this.delivered * 1000);
+        }
     }
 
     /** Start again. The overlay hangs a button off this. */

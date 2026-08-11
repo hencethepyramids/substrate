@@ -439,6 +439,24 @@ if (argv.has("gatherFor")) {
 // the same scoreboard, which is the reason both were routed through one deposit hook.
 if (argv.has("build")) {
     const rounds = Number(argv.get("build")) || 2;
+    // Count the goal layer's announcements by wrapping whatever main.ts already installed,
+    // rather than replacing it — so this measures the real handlers on their real path. A
+    // completion that fires every frame after the target is reached would show up here as a
+    // count in the hundreds, and is the failure a latch exists to prevent.
+    await page.evaluate(() => {
+        const g = window.__substrate.goals;
+        window.__calls = { founded: 0, complete: 0 };
+        const f = g.onFounded;
+        const c = g.onComplete;
+        g.onFounded = (x, z) => {
+            window.__calls.founded++;
+            f?.(x, z);
+        };
+        g.onComplete = (l) => {
+            window.__calls.complete++;
+            c?.(l);
+        };
+    });
     for (let i = 0; i < rounds; i++) {
         await page.keyboard.down("q");
         await page.waitForTimeout(900);
@@ -464,6 +482,8 @@ if (argv.has("build")) {
             progress: a.goals.progress,
             placed: a.verbs.placed,
             landed: a.verbs.landed,
+            complete: a.goals.complete,
+            calls: window.__calls,
         };
     });
     // Everything the verbs put on the ground has to appear on the scoreboard as either
@@ -475,6 +495,12 @@ if (argv.has("build")) {
         `goals: ${(g.delivered * 1000).toFixed(0)} L on site, ${(g.strayed * 1000).toFixed(0)} L strayed, ` +
             `${(g.progress * 100).toFixed(0)}% of target; verbs moved ${(moved * 1000).toFixed(0)} L ` +
             `${ok ? "(ALL ACCOUNTED)" : "*** A DEPOSIT WENT UNCOUNTED ***"}`,
+    );
+    // Founded exactly once however many loads arrive; complete exactly once if at all.
+    const announced = g.calls.founded === 1 && g.calls.complete === (g.complete ? 1 : 0);
+    console.log(
+        `goals: announced founded x${g.calls.founded}, complete x${g.calls.complete} ` +
+            `(mound ${g.complete ? "finished" : "unfinished"}) ${announced ? "(ONCE EACH)" : "*** REPEATED OR MISSED ***"}`,
     );
 }
 

@@ -178,6 +178,9 @@ async function boot(): Promise<void> {
         // it exists; delete the file and the simulation is unchanged.
         goals = new Goals(settings);
         verbs.onDeposit = (x, z, volume) => goals.deposit(x, z, volume);
+        // The goal layer reports; the overlay decides that reporting means a toast.
+        goals.onFounded = () => overlay.toast("site founded");
+        goals.onComplete = (litres) => overlay.toast(`mound complete - ${litres.toFixed(0)} L`);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);
@@ -277,9 +280,17 @@ async function boot(): Promise<void> {
         // it fills, where the cubic-metre figure would be four leading zeros.
         overlay.addCounter("mound", () => {
             if (!goals.started) return "no site yet";
-            const pct = (goals.progress * 100).toFixed(0);
+            const litres = (goals.delivered * 1000).toFixed(0);
+            if (goals.complete) return `complete (${litres} L)`;
+            // HOW FAR AWAY THE SITE IS, once you have walked off it. The site is invisible
+            // — nothing marks it and the first deposit founded it wherever the player
+            // happened to be standing — so without this the only way to find it again is to
+            // recognise your own hole. Only shown when it matters, since a distance of
+            // nothing is noise while you are standing on the thing.
+            const d = goals.distanceFrom(mover.position.x, mover.position.z);
+            const away = d > goals.siteRadius ? `, ${d.toFixed(0)} m away` : "";
             const stray = goals.strayed > 0 ? `, ${(goals.strayed * 1000).toFixed(0)} L strayed` : "";
-            return goals.complete ? `complete (${(goals.delivered * 1000).toFixed(0)} L)` : `${pct}% (${(goals.delivered * 1000).toFixed(0)} L)${stray}`;
+            return `${(goals.progress * 100).toFixed(0)}% (${litres} L)${away}${stray}`;
         });
         overlay.addCounter("carrying", () => {
             const litres = verbs.carried * 1000;
