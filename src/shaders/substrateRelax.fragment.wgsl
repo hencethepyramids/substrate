@@ -102,6 +102,13 @@ const SR_PACK_PERSIST: f32 = 4.0;
 /// Nothing this system does is allowed to move the ground by more than this.
 const SR_MAX_OFFSET: f32 = 2.0;
 
+/// Loose mass at which material is fully mobile — a shove carries it as fast as it is asked
+/// to. The same 5 cm scale as SR_BERM_REF above, and for the same reason: five centimetres
+/// of relief is where a disturbance stops being surface texture and becomes a feature. They
+/// are separate constants because they answer separate questions and should be free to move
+/// apart.
+const SR_LOOSE_REF: f32 = 0.05;
+
 /// Last frame's state at a texel of THIS frame's window.
 ///
 /// The window is snapped to its own texel grid, so a frame's scroll is always a whole
@@ -202,7 +209,28 @@ fn srShoveKernel(worldXZ: vec2f) -> f32 {
     return srGaussian(worldXZ, uniforms.srStamp.xy - uniforms.srStampVec) - srGaussian(worldXZ, uniforms.srStamp.xy + uniforms.srStampVec);
 }
 
-fn srStamped(state: vec4f, worldXZ: vec2f) -> vec4f {
+/// How willingly this texel gives material up to a shove, as a fraction of the rate asked.
+///
+/// THE VERB LAYER CANNOT ASK THIS QUESTION. verbs.ts decides where and how hard to sweep on
+/// the CPU, a frame before this runs, and nothing there can see the buffer — so "sweep the
+/// drift and not the bedrock under it" is not a harder call to write up there, it is an
+/// impossible one. It has to be decided per texel, here, by the only code that knows what is
+/// actually lying on the ground.
+///
+/// Two ways to be movable, and a shove takes the better of them. Loose material — the mass
+/// channel, what slump and deposits and settling air have left sitting proud — moves freely,
+/// saturating at SR_LOOSE_REF. Undisturbed ground still moves, because a bender moving only
+/// what someone else already loosened would be a groundskeeper; it moves at (1 - cohesion),
+/// which is the same split srStamped uses to decide whether a stamp throws a rim or packs.
+///
+/// So the element decides, and so does the player's own history: spCohesionAt folds in
+/// COMPACTION, so a patch trodden down with `R` resists being swept afterwards, and no line
+/// of this file knows that the pack verb exists.
+fn srMobile(s: vec4f) -> f32 {
+    return max(1.0 - spCohesionAt(s.z, s.w), min(s.y / SR_LOOSE_REF, 1.0));
+}
+
+fn srStamped(state: vec4f, c: vec2i, worldXZ: vec2f) -> vec4f {
     let amount = uniforms.srStamp.w;
 
     // A TRANSFER, NOT A DISPLACEMENT. Positive lifts material out and leaves a hollow with
@@ -231,16 +259,57 @@ fn srStamped(state: vec4f, worldXZ: vec2f) -> vec4f {
         return t;
     }
 
-    // KIND 3 IS KIND 0 TWICE, BACK TO BACK, so it runs the same four lines rather than a
-    // parallel copy of them. A shove lifts material at its source lobe exactly as a gather
-    // does — a hollow, no rim, the material is elsewhere now — and lays it down at its sink
-    // lobe exactly as a place does: signed into depression so the surface knows it is
-    // higher, and into mass so it is LOOSE and free to slump on the next step. The only
-    // difference between carrying a shovelful and sweeping a drift is where the material
-    // went, and that lives in the kernel, not here.
-    if (uniforms.srStampKind < 0.5 || uniforms.srStampKind > 2.5) {
-        let k = select(srScoopKernel(worldXZ), srShoveKernel(worldXZ), uniforms.srStampKind > 2.5);
-        let g = k * amount;
+    // A SHOVE GATHERS RATHER THAN SCATTERS, and that is what lets it be picky about what it
+    // picks up while still conserving exactly.
+    //
+    // The problem: how much this texel gives up now depends on what is lying HERE, so the
+    // amount arriving at the sink is no longer a property of the sink at all — it is a
+    // property of a texel one displacement away. A fragment shader cannot scatter, so the
+    // sink cannot be told. It has to go and look.
+    //
+    // And it can, because the two lobes are the SAME Gaussian about two centres: the sink
+    // lobe is the source lobe translated by exactly the displacement. So what arrives at p
+    // is precisely what left p - displacement, and both ends compute it from the same
+    // previous state with the same expression — the transport conserves by construction
+    // rather than by a correction, exactly as the antisymmetric slump flow above does.
+    //
+    // The displacement is a WHOLE NUMBER OF TEXELS because substrate.ts snaps it to the grid
+    // before it ever gets here, for the same reason the window's own scroll is snapped: an
+    // offset read that lands between texels is a filter, and a filter here would leak
+    // material into the gaps.
+    if (uniforms.srStampKind > 2.5) {
+        let off = vec2i(round(2.0 * uniforms.srStampVec / uniforms.srTexel));
+        let lift = srGaussian(worldXZ, uniforms.srStamp.xy - uniforms.srStampVec) * amount * srMobile(state);
+        let drop = srGaussian(worldXZ, uniforms.srStamp.xy + uniforms.srStampVec) * amount * srMobile(srPrevAt(c - off));
+        var t = state;
+        // Signed into depression the same way everything else here is: a hollow where the
+        // material left, standing proud where it arrived.
+        t.x = t.x + lift - drop;
+        // MASS FOLLOWS THE MATERIAL. Sweeping a drift consumes it, so the drift gets harder
+        // to sweep as it goes — that feedback is the whole point of the gate. Sweeping
+        // undisturbed ground lifts more than was ever loose there, so the subtraction runs
+        // negative, and zero is the correct answer: that material was not lying around, it
+        // was mobilised, and it is loose only where it landed.
+        //
+        // CLAMPED HERE, NOT AT THE WRITE-OUT, and the first version of this line relied on
+        // the write-out clamp and was wrong for precisely the reason written six lines above
+        // it. srStamped() runs on all nine taps BEFORE the stencil, and srSlumpFlow limits
+        // its flow with `min(q, src.y * SR_MAX_SHARE)` — so a negative mass makes that min
+        // pick the negative number and the slump runs BACKWARDS even at dt = 0, where it is
+        // supposed to be identically zero. That flow is not antisymmetric, because each texel
+        // takes the terrain derivative at its own centre, so it does not cancel between the
+        // two ends of a pair: it quietly created 0.25% of everything a shove moved. The
+        // write-out clamp never saw any of it.
+        t.y = max(t.y + drop - lift, 0.0);
+        return t;
+    }
+
+    // A TRANSFER ACROSS THE WORLD'S BOUNDARY. A gather lifts material at its lobe — a
+    // hollow, no rim, because the material is in the player's hands now — and a place lays
+    // it back down signed into depression so the surface knows it is higher, and into mass
+    // so it is LOOSE and free to slump on the next step.
+    if (uniforms.srStampKind < 0.5) {
+        let g = srScoopKernel(worldXZ) * amount;
         var t = state;
         // SIGNED INTO DEPRESSION, which is the same convention the bowl above uses for its
         // pit and its rim: positive is a hollow, negative stands proud. The first version
@@ -272,7 +341,7 @@ fn srStamped(state: vec4f, worldXZ: vec2f) -> vec4f {
 }
 
 fn srState(c: vec2i) -> vec4f {
-    return srStamped(srPrevAt(c), srWorldOf(c));
+    return srStamped(srPrevAt(c), c, srWorldOf(c));
 }
 
 /// Loose material arriving at `me` from `other`, in metres of surface height. Negative

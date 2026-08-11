@@ -373,17 +373,34 @@ export class Substrate {
      * fine because the shove is still perfectly neutral. Dividing it back out here is what
      * makes "move half a cubic metre" mean half a cubic metre at every displacement, and
      * keeps conservation a property of the interface exactly as scoop's is.
+     *
+     * `volume` IS AN UPPER BOUND, NOT A PROMISE, and that is a deliberate change from what
+     * this said before. The relaxation decides per texel how much material is actually
+     * there to be moved — loose mass goes freely, undisturbed ground gives up (1 - cohesion)
+     * of the rate — so a sweep across a drift delivers all of this and a sweep across bare
+     * cohesive ground delivers a fraction. What it never does is deliver more than it took:
+     * the two ends are computed from the same previous state, so conservation holds exactly
+     * whatever the ground decides. See srMobile in the relaxation pass.
      */
     shove(x: number, z: number, radius: number, dx: number, dz: number, volume: number): void {
         if (volume === 0) return;
         const r = Math.max(radius, 1e-3);
-        const len = Math.hypot(dx, dz);
+        // SNAPPED TO THE TEXEL GRID, for the same reason the window's own scroll is. The
+        // relaxation decides how much material a texel gives up from what is lying on it,
+        // which means the sink has to read the state one displacement back — and an offset
+        // read that lands between texels is a filter. Filtering there would leak material
+        // into the gaps between texels on every step of every sweep. A whole number of
+        // texels makes it an exact copy, and costs at most half a texel of aim.
+        const texel = this._extent / this._size;
+        const sx = Math.round(dx / texel) * texel;
+        const sz = Math.round(dz / texel) * texel;
+        const len = Math.hypot(sx, sz);
         if (len < r * SHOVE_MIN_FRACTION) return;
         // The kernel is centred on the MIDPOINT of the journey and reaches half the
         // displacement each way, so what the caller gave as "from here to there" arrives as
         // "about here, this far either side" — one conversion, in one place.
         const crossing = erf(len / (2 * r));
-        this._enqueue(x + dx * 0.5, z + dz * 0.5, r, volume / (Math.PI * r * r * crossing), 3, dx * 0.5, dz * 0.5);
+        this._enqueue(x + sx * 0.5, z + sz * 0.5, r, volume / (Math.PI * r * r * crossing), 3, sx * 0.5, sz * 0.5);
     }
 
     private _enqueue(x: number, z: number, radius: number, amount: number, kind: number, vx = 0, vz = 0): void {

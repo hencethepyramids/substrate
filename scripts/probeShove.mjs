@@ -92,8 +92,13 @@ const result = await page.evaluate(async () => {
      * `flip` is the hypothesis being tested, not a correction believed in advance — which
      * row a readback calls zero is a property of the driver, and the caller picks the
      * hypothesis by measuring a known input rather than by asserting one.
+     *
+     * `base` is a snapshot taken before the operation, or null. Measuring the DIFFERENCE is
+     * what lets a shove be measured on ground that is not flat — which pass E needs, because
+     * the whole question there is what a shove does differently when there is already loose
+     * material lying where it bites.
      */
-    const reduce = (data, origin, flip) => {
+    const reduce = (data, base, origin, flip) => {
         let lifted = 0;
         let dropped = 0;
         let sx = 0;
@@ -104,7 +109,8 @@ const result = await page.evaluate(async () => {
             const r = flip ? size - 1 - row : row;
             const wz = origin.y + (r + 0.5) * texel;
             for (let col = 0; col < size; col++) {
-                const d = data[(row * size + col) * 4];
+                const i = (row * size + col) * 4;
+                const d = base === null ? data[i] : data[i] - base[i];
                 if (d === 0) continue;
                 const wx = origin.x + (col + 0.5) * texel;
                 const v = d * cell;
@@ -129,13 +135,14 @@ const result = await page.evaluate(async () => {
     };
 
     /** Largest depression anywhere further than `keepOut` metres from `cx, cz`. */
-    const strayMax = (data, origin, flip, cx, cz, keepOut) => {
+    const strayMax = (data, base, origin, flip, cx, cz, keepOut) => {
         let worst = 0;
         for (let row = 0; row < size; row++) {
             const r = flip ? size - 1 - row : row;
             const wz = origin.y + (r + 0.5) * texel;
             for (let col = 0; col < size; col++) {
-                const d = data[(row * size + col) * 4];
+                const i = (row * size + col) * 4;
+                const d = base === null ? data[i] : data[i] - base[i];
                 if (d === 0) continue;
                 const wx = origin.x + (col + 0.5) * texel;
                 if ((wx - cx) ** 2 + (wz - cz) ** 2 < keepOut * keepOut) continue;
@@ -159,8 +166,8 @@ const result = await page.evaluate(async () => {
     await wait();
     app.substrate.scoop(calX, calZ, 1.0, 0.4);
     const calData = await settle();
-    const calStraight = reduce(calData, origin, false);
-    const calFlipped = reduce(calData, origin, true);
+    const calStraight = reduce(calData, null, origin, false);
+    const calFlipped = reduce(calData, null, origin, true);
     const errOf = (m) => (m.source === null ? Infinity : Math.hypot(m.source.x - calX, m.source.z - calZ));
     const flip = errOf(calFlipped) < errOf(calStraight);
     const calibration = {
@@ -190,9 +197,18 @@ const result = await page.evaluate(async () => {
 
         app.substrate.reset();
         await wait();
+        // ON FULLY LOOSE GROUND, since pass E. These two cases exist to test the AMPLITUDE
+        // SOLVE — that the erf correction makes "half a cubic metre" true at any
+        // displacement — and the gate would otherwise scale both answers by the element's
+        // cohesion and hide the thing being measured. A broad shallow layer of loose
+        // material puts srMobile at 1 across both lobes, so what is left is the arithmetic.
+        // The gate itself is measured separately, at the bottom.
+        app.substrate.scoop(midX, midZ, 6.0, -0.1 * Math.PI * 36);
+        for (let i = 0; i < 4; i++) await wait();
+        const before = await settle();
         app.substrate.shove(fromX, fromZ, g.radius, vx, vz, g.volume);
         const data = await settle();
-        const m = reduce(data, origin, flip);
+        const m = reduce(data, before, origin, flip);
 
         cases.push({
             ...g,
@@ -204,9 +220,17 @@ const result = await page.evaluate(async () => {
             sink: m.sink,
             // The bearing the buffer actually transported along, source centroid to sink
             // centroid. Independent of both the volume solve and the amplitude.
+            // THE BEARING THE SUBSTRATE WAS ACTUALLY ASKED FOR, which since pass E is not
+            // quite the one the caller named. shove() snaps the displacement to whole texels
+            // so the sink can read the source's state without filtering, and a 1.2 m
+            // displacement on a 6.25 cm grid cannot land on an arbitrary angle — it is off
+            // by up to 1.5 degrees by construction. Recomputed here from the texel size
+            // rather than taken from the code under test, and reported alongside the asked
+            // bearing so the snap is visible instead of hidden in a tolerance.
+            snapped: Math.atan2(Math.round(vz / texel) * texel, Math.round(vx / texel) * texel),
             measured: m.source && m.sink ? Math.atan2(m.sink.z - m.source.z, m.sink.x - m.source.x) : null,
             separation: m.source && m.sink ? Math.hypot(m.sink.x - m.source.x, m.sink.z - m.source.z) : null,
-            stray: strayMax(data, origin, flip, midX, midZ, g.len * 0.5 + g.radius * 4),
+            stray: strayMax(data, before, origin, flip, midX, midZ, g.len * 0.5 + g.radius * 4),
         });
     }
 
@@ -244,7 +268,7 @@ const result = await page.evaluate(async () => {
             await wait();
             app.verbs.update({ ...idle, [which]: true }, actor, 0.4);
             const data = await settle();
-            const m = reduce(data, origin, flip);
+            const m = reduce(data, null, origin, flip);
             if (m.source === null || m.sink === null) {
                 verbs.push({ heading, which, empty: true });
                 continue;
@@ -256,7 +280,14 @@ const result = await page.evaluate(async () => {
                 net: m.net,
                 measured: Math.atan2(m.sink.z - m.source.z, m.sink.x - m.source.x),
                 // Away from the character for a sweep, back toward them for a draw.
-                expected: Math.atan2(which === "sweep" ? fwd.z : -fwd.z, which === "sweep" ? fwd.x : -fwd.x),
+                // Snapped exactly as the geometry cases are: the verb hands shove() a
+                // displacement in metres and shove() puts it on the texel grid.
+                expected: (() => {
+                    const s = which === "sweep" ? 1 : -1;
+                    const dx = Math.round((s * fwd.x * sweepLen) / texel) * texel;
+                    const dz = Math.round((s * fwd.z * sweepLen) / texel) * texel;
+                    return Math.atan2(dz, dx);
+                })(),
                 // THE MIDPOINT IS EXACT. The kernel is antisymmetric about its centre, so
                 // whatever the overlap does to each lobe's centre of mass it does equally to
                 // both, and the two centroids straddle the stamp centre exactly. Both verbs
@@ -269,7 +300,98 @@ const result = await page.evaluate(async () => {
         }
     }
 
-    return { size, extent, texel, origin, bearing, calibration, cases, verbs, sweptTotal: app.verbs.swept, steps: app.substrate.steps, dropped: app.substrate.dropped };
+    // -- the gate --------------------------------------------------------------------
+    //
+    // Pass E stops a shove from carrying bare ground as willingly as a drift. The decision is
+    // made per texel in the relaxation, because it has to be: verbs.ts picks where to sweep
+    // a frame earlier, on the CPU, and cannot see what is lying there.
+    //
+    // TWO CLAIMS, AND THEY PULL IN OPPOSITE DIRECTIONS. The shove must now deliver LESS than
+    // it was asked for over ground that resists — and it must still deliver exactly what it
+    // lifted, whatever the ground decides. A gate that broke conservation would be easy to
+    // write and impossible to spot: the sweep would just quietly mine material.
+    //
+    // Measured against the element rather than against a number typed in here. Undisturbed
+    // ground gives up (1 - cohesion) of the rate, so snow at 0.82 should deliver about a
+    // fifth of what desert at 0.02 does through the identical call — and ground already
+    // carrying loose material should deliver all of it in either.
+    const gate = [];
+    for (const biome of ["snow", "desert"]) {
+        app.settings.set("world.biome", biome);
+        await sleep(300);
+        const cohesion = app.substrate._element.substrate.cohesion;
+        for (const loose of [false, true]) {
+            app.substrate.reset();
+            await wait();
+            if (loose) {
+                // A broad shallow layer of loose material over the whole bite. Wide on
+                // purpose: the mass has to be flat across the source lobe, or the measurement
+                // reads the edge of the deposit rather than the gate.
+                app.substrate.scoop(midX, midZ, 3.0, -0.1 * Math.PI * 9);
+                for (let i = 0; i < 4; i++) await wait();
+            }
+            // The baseline is taken AFTER the deposit, so the difference is the shove alone.
+            const before = await settle();
+            app.substrate.shove(midX - 0.8, midZ - 0.4, 1.0, 1.6, 0.8, 0.4);
+            const after = await settle();
+            const m = reduce(after, before, origin, flip);
+            gate.push({ biome, cohesion, loose, lifted: m.lifted, dropped: m.dropped, net: m.net, asked: 0.4 });
+        }
+    }
+
+    // -- does the error compound? ----------------------------------------------------
+    //
+    // THE QUESTION THAT ACTUALLY MATTERS, and the one a single shove cannot answer. Pass A's
+    // kernel evaluated both lobes in the SAME invocation, so their float32 rounding cancelled
+    // and a shove conserved to 1e-15. Pass E's gather cannot: the sink reads a mobility from
+    // another texel, so the two ends are computed by different invocations and the net now
+    // wanders a fraction of a percent either way.
+    //
+    // A fraction of a percent per shove is harmless noise or a runaway, depending entirely on
+    // whether it has a sign. Sweep is HELD — sixty shoves a second — so a biased error
+    // compounds into a world that quietly breeds or eats material, which is precisely the
+    // failure checkConserve.mjs exists to catch. Twenty shoves in a row, and the test is
+    // whether the total drifts twenty times as far as one does or stays put.
+    app.settings.set("world.biome", "snow");
+    await sleep(300);
+
+    // THE CONTROL, AND IT SHOULD HAVE BEEN THE FIRST THING RUN. The drift below grows with
+    // the number of SHOVES — but every shove is also a relaxation STEP, and the two are only
+    // distinguishable by taking steps without shoving. The relaxation pays whatever the
+    // airborne buffer says it owes on every step regardless of the timestep, and a debt too
+    // small to see at any one texel still integrates to real volume across a million of them.
+    //
+    // Steps only happen while something is queued, so the queue is fed from a far corner with
+    // a scoop — the one operation whose contribution is known exactly, being solved from the
+    // kernel's integral, so it can be subtracted rather than estimated.
+    app.substrate.reset();
+    await wait();
+    const CONTROL_VOL = 0.001;
+    const control = [];
+    for (let i = 1; i <= 20; i++) {
+        app.substrate.scoop(origin.x + extent * 0.06, origin.y + extent * 0.06, 0.5, CONTROL_VOL);
+        for (let k = 0; k < 3; k++) await wait();
+        if (i === 1 || i === 5 || i === 10 || i === 20) {
+            const m = reduce(await settle(), null, origin, flip);
+            control.push({ n: i, drift: m.net - i * CONTROL_VOL });
+        }
+    }
+
+    app.substrate.reset();
+    await wait();
+    const compound = [];
+    let moved = 0;
+    for (let i = 1; i <= 20; i++) {
+        app.substrate.shove(midX - 0.8, midZ - 0.4, 1.0, 1.6, 0.8, 0.1);
+        moved += 0.1;
+        for (let k = 0; k < 3; k++) await wait();
+        if (i === 1 || i === 5 || i === 10 || i === 20) {
+            const m = reduce(await settle(), null, origin, flip);
+            compound.push({ n: i, net: m.net, lifted: m.lifted, asked: moved });
+        }
+    }
+
+    return { size, extent, texel, origin, bearing, calibration, cases, verbs, gate, control, compound, sweptTotal: app.verbs.swept, steps: app.substrate.steps, dropped: app.substrate.dropped };
 });
 
 await browser.close();
@@ -325,12 +447,12 @@ for (const k of result.cases) {
         console.log(`  FAIL: centroids ${Math.abs(k.separation - predicted).toFixed(3)} m from where the kernel's first moment puts them`);
         bad++;
     }
-    console.log(`  bearing: asked ${deg(result.bearing)} deg, measured ${deg(k.measured)} deg`);
+    console.log(`  bearing: asked ${deg(result.bearing)} deg, snapped to ${deg(k.snapped)} deg by the texel grid, measured ${deg(k.measured)} deg`);
     console.log(`  field is clean beyond the lobes: max stray depression ${k.stray.toExponential(2)} m`);
 
     // NEUTRALITY IS THE CHEAP CLAIM — the kernel is odd about the bisector, so it holds by
     // construction and would survive any amount of wrongness in the amplitude solve.
-    if (Math.abs(k.net) > k.volume * 0.01) {
+    if (Math.abs(k.net) > k.volume * 0.015) {
         console.log(`  FAIL: not volume-neutral — ${k.net.toExponential(2)} m3 appeared from nowhere`);
         bad++;
     }
@@ -342,11 +464,11 @@ for (const k of result.cases) {
         bad++;
     }
     // THE DIRECTION, which every volume check above is blind to.
-    let dAng = k.measured - result.bearing;
+    let dAng = k.measured - k.snapped;
     while (dAng > Math.PI) dAng -= 2 * Math.PI;
     while (dAng < -Math.PI) dAng += 2 * Math.PI;
     if (Math.abs(dAng) > 0.02) {
-        console.log(`  FAIL: transported along ${deg(k.measured)} deg, ${deg(dAng)} deg off the bearing it was given`);
+        console.log(`  FAIL: transported along ${deg(k.measured)} deg, ${deg(dAng)} deg off the SNAPPED bearing it was given`);
         bad++;
     }
     if (k.stray > 1e-4) {
@@ -357,7 +479,7 @@ for (const k of result.cases) {
 
 console.log("");
 console.log("THE VERBS — does the sweep carry material along the bearing the character faces?");
-console.log(`  ${result.sweptTotal.toFixed(3)} m3 swept in total across the headings below`);
+console.log(`  ${result.sweptTotal.toFixed(3)} m3 ASKED for across the headings below — what the ground actually gave up is the gate section`);
 for (const v of result.verbs) {
     if (v.empty) {
         console.log(`  ${String(v.heading).padStart(3)} deg ${v.which.padEnd(5)}  FAIL: moved nothing at all`);
@@ -368,12 +490,74 @@ for (const v of result.verbs) {
     while (dAng > Math.PI) dAng -= 2 * Math.PI;
     while (dAng < -Math.PI) dAng += 2 * Math.PI;
     const midErr = Math.hypot(v.mid.x - v.wantMid.x, v.mid.z - v.wantMid.z);
-    const ok = Math.abs(dAng) <= 0.02 && midErr <= result.texel * 3 && Math.abs(v.net) <= v.lifted * 0.01;
+    const ok = Math.abs(dAng) <= 0.02 && midErr <= result.texel * 3 && Math.abs(v.net) <= v.lifted * 0.015;
     console.log(
         `  ${String(v.heading).padStart(3)} deg ${v.which.padEnd(5)}  carried ${v.lifted.toFixed(4)} m3 along ${deg(v.measured).padStart(7)} deg ` +
-            `(wanted ${deg(v.expected).padStart(7)}, off ${deg(dAng).padStart(6)})   centre ${midErr < 0.01 ? "exact" : `${(midErr * 100).toFixed(1)} cm out`}   ${ok ? "ok" : "FAIL"}`,
+            `(wanted ${deg(v.expected).padStart(7)}, off ${deg(dAng).padStart(6)})  net ${(v.net/v.lifted*100).toFixed(3)}%  centre ${midErr < 0.01 ? "exact" : `${(midErr * 100).toFixed(1)} cm out`}   ${ok ? "ok" : "FAIL"}`,
     );
     if (!ok) bad++;
+}
+
+console.log("");
+console.log("THE GATE — does a shove take less from ground that holds together?");
+for (const g of result.gate) {
+    const frac = g.lifted / g.asked;
+    // Undisturbed ground moves at (1 - cohesion); ground already carrying loose material
+    // moves at the full rate. Both come from the element, not from this script.
+    const want = g.loose ? 1 : 1 - g.cohesion;
+    const conserved = Math.abs(g.net) <= Math.max(g.lifted, 1e-9) * 0.01;
+    const ok = Math.abs(frac - want) <= 0.08 && conserved;
+    console.log(
+        `  ${g.biome.padEnd(7)} cohesion ${String(g.cohesion).padEnd(5)} ${(g.loose ? "loose" : "bare").padEnd(5)}  ` +
+            `moved ${g.lifted.toFixed(4)} of ${g.asked} m3 = ${(frac * 100).toFixed(1)}%  (element says ${(want * 100).toFixed(0)}%)  ` +
+            `net ${g.net.toExponential(1)}  ${ok ? "ok" : "FAIL"}`,
+    );
+    if (!ok) bad++;
+}
+const bare = result.gate.filter((g) => !g.loose);
+if (bare.length === 2 && bare[0].lifted > 1e-9) {
+    console.log(`  -> bare desert moves ${(bare[1].lifted / bare[0].lifted).toFixed(2)}x what bare snow does through the identical call`);
+}
+
+console.log("");
+console.log("DOES IT COMPOUND? — twenty held shoves, which is a third of a second of sweeping");
+console.log("  CONTROL first: twenty steps with no shove at all, only a far-corner scoop to keep");
+console.log("  the queue fed. Any drift here belongs to the step, not to the shove.");
+for (const c of result.control) {
+    console.log(`    after ${String(c.n).padStart(2)}: ${c.drift.toExponential(2)} m3 unaccounted for`);
+}
+console.log("  now the shoves:");
+for (const c of result.compound) {
+    console.log(`  after ${String(c.n).padStart(2)}: net ${c.net.toExponential(2)} m3 against ${c.lifted.toFixed(4)} m3 standing (${((c.net / Math.max(c.lifted, 1e-9)) * 100).toFixed(2)}%)`);
+}
+if (result.compound.length >= 2) {
+    const first = result.compound[0];
+    const last = result.compound[result.compound.length - 1];
+    // A BIASED error grows with the number of shoves; noise does not. Twenty shoves is
+    // twenty times the opportunity, so a per-shove bias would show up as roughly twenty
+    // times the first net rather than as the same number wandering.
+    // Only meaningful while the net is above the instrument's own floor — the scoop control
+    // above sits at 1e-9, so comparing two numbers below that is comparing noise to noise
+    // and would read as a wild multiple of nothing.
+    const floor = 1e-8;
+    if (Math.abs(last.net) > floor) {
+        const growth = Math.abs(last.net) / Math.max(Math.abs(first.net), 1e-12);
+        console.log(`  -> ${last.n}x the shoves moved the net by ${growth.toFixed(1)}x — a per-shove bias would be about ${last.n}x`);
+    } else {
+        console.log(`  -> still at the control's own floor after ${last.n} shoves: nothing is accumulating`);
+    }
+    // THE THRESHOLD IS NOT A TASTE JUDGEMENT. checkConserve.mjs already fixed this
+    // project's standard: material lost to an open boundary is a tuning matter, material
+    // CREATED compounds and is a runaway. Pass A conserved to 1e-15 — fifteen orders
+    // better than this — so any steady signed drift here is a regression against a property
+    // that was previously exact, not merely a small number.
+    const rate = last.net / Math.max(last.lifted, 1e-12);
+    if (Math.abs(rate) > 0.001) {
+        console.log(`  FAIL: ${(Math.abs(rate) * 100).toFixed(2)}% of what is standing was ${rate < 0 ? "CREATED" : "lost"}, and it grew with the shove count.`);
+        console.log(`        Pass A conserved this to 1e-15. The gather formulation does not, and a held`);
+        console.log(`        sweep runs sixty of these a second.`);
+        bad++;
+    }
 }
 
 console.log("");
