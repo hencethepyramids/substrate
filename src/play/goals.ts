@@ -55,6 +55,21 @@ export class Goals {
     height = 0;
     /** The tallest it has ever been, which is what the goal is scored against. */
     peakHeight = 0;
+    /**
+     * The lowest it has stood since it was founded — what the weather left of it.
+     *
+     * PHASE 11 SCORED THE PEAK ON PURPOSE, and said why: snow creeps for seconds after the
+     * last shovelful, so a mound scored on its instantaneous height would finish and unfinish
+     * itself while the player stood watching. That was the right call in a world where
+     * nothing threatened the pile.
+     *
+     * Phase 14 gives it something to survive, and the peak stops being the whole story: a
+     * wall that stood for one frame and then blew away has the same peak as one that held.
+     * So this is the other end of the same measurement, and `survival` is the ratio. Neither
+     * replaces the other — the goal still completes on the peak, because a thing that was
+     * built WAS built, and what happened to it afterwards is a separate sentence.
+     */
+    lowHeight = 0;
     /** True once `delivered` reaches the target. Latches; a mound is not un-built. */
     complete = false;
 
@@ -95,6 +110,7 @@ export class Goals {
         if (!this.started || !(this._settings.v["sys.goals"] as boolean)) return;
         this.height = this._heights.groundAt(this.site.x, this.site.z) - this.baseHeight;
         if (this.height > this.peakHeight) this.peakHeight = this.height;
+        if (this.height < this.lowHeight) this.lowHeight = this.height;
         if (!this.complete && this.progress >= 1) {
             this.complete = true;
             this.onComplete?.(this.peakHeight);
@@ -131,6 +147,18 @@ export class Goals {
      */
     get settled(): number {
         return Math.max(0, this.peakHeight - this.height);
+    }
+
+    /**
+     * How much of what was built is still standing, 0 to 1.
+     *
+     * THE NUMBER PHASE 14 IS FOR. Two heights that were both actually measured, divided —
+     * no model of what the pile "should" be, for the reason `settled` above records at
+     * length. A mound that never had a peak has no survival to report rather than a
+     * flattering 1.
+     */
+    get survival(): number {
+        return this.peakHeight > 1e-6 ? Math.max(0, this.height / this.peakHeight) : 0;
     }
 
     /**

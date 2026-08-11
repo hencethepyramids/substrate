@@ -13,6 +13,7 @@ import { Input } from "./core/input";
 import { Verbs } from "./play/verbs";
 import { Thrown } from "./play/thrown";
 import { Goals } from "./play/goals";
+import { Weather } from "./play/weather";
 import { CameraRig } from "./core/cameraRig";
 import { Mover } from "./core/mover";
 import { Sky } from "./render/sky";
@@ -82,6 +83,7 @@ async function boot(): Promise<void> {
     let character!: Figure;
     let gait!: Gait;
     let gesture!: Gesture;
+    let weather!: Weather;
     let groundProbe!: GroundProbe;
     let airProbe!: AirProbe;
     let cloak!: Cloak;
@@ -147,6 +149,7 @@ async function boot(): Promise<void> {
         // its geometry is authored against the rig, and its pose is the gait's palette.
         gait = new Gait(settings, terrain.field);
         gesture = new Gesture(settings);
+        weather = new Weather(settings);
         // The CPU window of the substrate. Built after it, handed to the gait, so the feet
         // land on the ground the character has carved rather than on the one beneath it.
         groundProbe = new GroundProbe(scene, settings, substrate);
@@ -432,6 +435,9 @@ async function boot(): Promise<void> {
         perf.begin(S_SUBSTRATE);
         // The wind first: Phase 5's second pass will lift material with it, and the
         // beauty pass reads it this frame either way.
+        // Before the air, which reads world.windStrength as a plain property — so the field
+        // this frame is built from this frame's weather rather than last frame's.
+        weather.update(simDt);
         air.update(simDt);
         // Then the carve sources, then the step that consumes them.
         carve.update(input, mover, gait, substrate, simDt);
@@ -512,7 +518,7 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake, spray, verbs, goals, gesture };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake, spray, verbs, goals, gesture, weather };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();

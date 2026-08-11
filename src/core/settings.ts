@@ -113,6 +113,7 @@ export const SCHEMA = {
     "sys.post": bool({ group: "Systems", label: "Post chain", def: true }),
     "sys.verbs": bool({ group: "Systems", label: "Player verbs", def: true }),
     "sys.goals": bool({ group: "Systems", label: "Goals", def: true }),
+    "sys.weather": bool({ group: "Systems", label: "Weather", def: true, hint: "The first thing here that is not on the player's side. Off leaves world.windStrength wherever it was last set, which is what every phase before 14 looked like." }),
 
     // -- Terrain -------------------------------------------------------------
     "terrain.heightScale": num({ group: "Terrain", label: "Height scale", def: 1, min: 0.05, max: 2.5, step: 0.01, hint: "Applied when the field is read, so it is live with no rebake." }),
@@ -228,6 +229,10 @@ export const SCHEMA = {
     "play.digRadius": num({ group: "Play", label: "Dig radius", def: 0.55, min: 0.2, max: 2, step: 0.05, unit: "m" }),
     "play.digRate": num({ group: "Play", label: "Dig rate", def: 0.35, min: 0.02, max: 2, step: 0.01, unit: "m3/s", hint: "Volume moved per second while gathering or placing. A shovelful is roughly 0.01 m3, so this is a brisk but not absurd pace." }),
     "play.packRate": num({ group: "Play", label: "Pack rate", def: 0.9, min: 0.05, max: 4, step: 0.05, unit: "/s", hint: "Compaction added per second while packing. Compaction drives albedo and roughness, so packed ground is both a different colour and smoother — which is what makes it reflect." }),
+    "weather.period": num({ group: "Weather", label: "Cycle length", def: 90, min: 10, max: 600, step: 5, unit: "s", hint: "Calm to storm and back. The calm is the point: a world that is always eroding is a tax, and a world that is quiet and then is not gives a build a deadline." }),
+    "weather.stormFraction": num({ group: "Weather", label: "Storm share", def: 0.35, min: 0.05, max: 0.9, step: 0.05, hint: "How much of the cycle is weather at all. The rest is flat calm." }),
+    "weather.calmWind": num({ group: "Weather", label: "Calm wind", def: 0.12, min: 0, max: 1, step: 0.01, hint: "What world.windStrength sits at between storms." }),
+    "weather.stormWind": num({ group: "Weather", label: "Storm wind", def: 0.92, min: 0, max: 1, step: 0.01, hint: "And at the height of one. Written into world.windStrength rather than held here, so the slider and the sky always agree." }),
     "goal.moundHeight": num({ group: "Play", label: "Mound target", def: 0.8, min: 0.1, max: 3, step: 0.05, unit: "m", hint: "How tall the pile has to stand. Scored on what is ACTUALLY there, not on what was tipped in — snow slumps at its angle of repose, so a mound has to be built faster than the ground takes it back, or packed as it goes." }),
     "play.throwSpeed": num({ group: "Play", label: "Throw speed", def: 9, min: 2, max: 25, step: 0.5, unit: "m/s" }),
     "play.throwAngle": num({ group: "Play", label: "Throw angle", def: 22, min: 0, max: 60, step: 1, unit: "deg" }),

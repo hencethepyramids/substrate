@@ -1464,6 +1464,65 @@ the whole torso pitched into the throw at the top of the blow, cape trailing beh
 
 Phase 13 is done.
 
+## Phase 14 — stakes
+
+### Pass A: something that is not on the player's side
+
+Every phase before this one added a capability. A player could build a wall and it stood
+there for as long as the tab was open — no reason to build one thing rather than another, and
+no reason to hurry.
+
+**Weather is a driver, not a simulation.** Wind has lifted material off the ground, carried it
+and put it back down since Phase 5, and the elements already differ in how susceptible they
+are to it. So `play/weather.ts` is a *schedule* — when is it calm, when does it blow, how
+hard — and it writes `world.windStrength` rather than holding its own number, the same
+contract the wheel zoom keeps with `cam.armLength`. Building the erosion again inside a file
+called `weather.ts` would be a second physics next to the real one.
+
+**The cycle has a real calm in it, and that matters more than the storm.** A world that is
+always eroding is not opposition, it is a tax: everything decays and the only strategy is to
+build faster. A world that is quiet and then is not gives a build a *deadline*, which is what
+makes one plan better than another — pack it before the wind comes, put it in the lee of
+something, or accept that this one is not going to survive.
+
+The goal layer gains `survival`, the other end of the measurement it already had. Phase 11
+scored the **peak** on purpose and said why: snow creeps for seconds after the last shovelful,
+so a mound scored on its instantaneous height would finish and unfinish itself while the
+player watched. That was right when nothing threatened the pile. Now a wall that stood for one
+frame and blew away has the same peak as one that held, so `survival` is `height / peakHeight`
+— two heights that were both measured, divided. The goal still completes on the peak, because
+a thing that was built *was* built, and what happened to it afterwards is a separate sentence.
+
+[scripts/probeWeather.mjs](scripts/probeWeather.mjs) raises the identical pile twice, from the
+same call at the same place, and gives one of them a storm. **The control is the whole point:**
+a pile settles on its own, and that settling would happily be reported as erosion.
+
+| | calm | storm | the storm's share |
+| --- | --- | --- | --- |
+| snow (cohesion 0.82) | lost 109 litres | lost 788 | **48% of the pile** |
+| desert (cohesion 0.02) | lost 812 litres | lost 1072 | 22% of the pile |
+
+Snow is where the design lives: a pile is nearly permanent in a calm (7.7% lost) and loses
+about half of itself to a storm, so there is something worth protecting. Sand loses 70% to its
+own decay whether or not anything is blowing — the storm is a smaller share of a pile that was
+never going to last. Same code, same numbers, different element block.
+
+**Two versions of that measurement were wrong before it was right**, both by pointing the
+instrument at the wrong place:
+
+- the first asked `gait.groundAt(site)`, which reads the CPU ground-probe **tile** — four
+  metres wide, centred on the character. The site was eight metres away, so both runs read the
+  bare heightfield and reported an identical 3.704 m and *zero* erosion. A perfectly steady
+  number from an instrument aimed at nothing.
+- the second summed proud material over the **whole window**, which counts the drifts a storm
+  builds *elsewhere* as though the pile still had them — and duly reported that a storm in snow
+  left **more** standing than a calm did. Restricting the sum to a disc around the site
+  reversed the sign.
+
+No shot is committed for this pass. The obvious one — a storm blowing — photographs as weather
+rather than as *loss*, and the honest picture is a before-and-after of a specific pile, which
+is a capture harness change rather than a camera angle. The numbers above are the evidence.
+
 ### What the remaining phases are for
 
 Phases 0 to 9 built a world; 10 and 11 gave someone a way to act in it and a reason to. What
@@ -1487,10 +1546,9 @@ draw, the ridge, the wall, and the gate that decides how much the ground is will
 for the two that are events, and a lean spent through the spine above the pelvis so the feet
 never learn about it.
 
-**Phase 14 — stakes.** A sandbox with no opposition. Weather that undoes the work, ground
-that collapses if undercut, a reason to build one thing rather than another. The substrate
-already models everything needed for the first two and the goal layer already scores what
-survives rather than what was delivered, which is the hook these hang on.
+**Phase 14 — stakes.** Pass A is done and is written up
+[below](#phase-14--stakes): weather, and a goal layer that scores what survived. Ground that
+collapses if undercut is what is left.
 
 ---
 
