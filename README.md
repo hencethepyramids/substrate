@@ -1315,6 +1315,69 @@ Phase 10. I made the same mistake one branch down and the file had already warne
 
 1e-9 is the instrument's own floor — the scoop control sits at the same 1.6e-9.
 
+## Phase 13 — the bender's body
+
+### Pass A: the arms answer to the ground
+
+Phase 12 gave the player five ways to move earth and the character performed none of them.
+The ridge ran, the wall went up, the drift swept aside, and the figure stood there with its
+arms swinging as though out for a walk. Every other system in this project answers to
+something; the body answered only to where the feet were going.
+
+[phase13-raise-before.png](shots/phase13-raise-before.png) and
+[phase13-raise-snow.png](shots/phase13-raise-snow.png) are the same frame with
+`sys.gesture` off and on — same camera, same sun, same key held, same mound rising out of
+the ground in front. In the first the arms hang.
+
+**This is not in `gait.ts`, and that is the pass.** The gait solves *locomotion* — where the
+feet land, how the pelvis rides, what the arms do to balance a stride — from speed and
+heading alone. A gesture is driven by something the gait has no business knowing: which verb
+is held. One file for both would mean the leg solver could see the verb layer, and the first
+time a bending pose needed a foot to move, the two would fight over the same bones. So
+`character/gesture.ts` decides a **pose** and the gait decides **how much of it to believe**.
+
+Poses are shoulder and elbow angles rather than hand positions, which is worth saying because
+the obvious alternative is to name a point in space and solve for the arm. That is IK, and IK
+needs a reachability answer for every pose at every body scale; these are two numbers that
+cannot fail. Phase 7 already established the arm reads without IK.
+
+Both arms take the same angle, where the swing gives them opposite ones — **that opposition is
+the whole visual difference between walking and commanding.** A stride counter-phases the arms
+against the legs; a bender brings them together onto the same piece of ground.
+
+The blend is a rate in both directions. Snapping to a pose the frame a key goes down is the
+difference between a body and a mannequin being posed; snapping back on release is worse,
+because the arms drop into the walk cycle mid-swing.
+
+[scripts/probeGesture.mjs](scripts/probeGesture.mjs) presses each key through the real input
+path and reads the hand bones out of the skeleton, in character space so the claims do not
+depend on where the figure is standing:
+
+| | hand height | reach |
+| --- | --- | --- |
+| idle | 0.821 m | 0.030 m |
+| raise | **1.784 m** | 0.386 m |
+| lower | 1.056 m | 0.425 m |
+| sweep | 1.449 m | **0.494 m** |
+| draw | 1.476 m | 0.319 m |
+| pedestal | 0.841 m | **−0.239 m** |
+
+Every claim is an ordering rather than an absolute, because the absolutes are body
+proportions that would have to be retyped whenever the rig changed: raising puts the hands
+above lowering, sweeping reaches further out than drawing, and the pedestal is the only pose
+whose hands go **back** — which is the case that would catch an inverted shoulder sign, since
+it is the only negative one.
+
+And the half nobody checks: every pose blends to 1.000 while held and returns to 0.000 when
+released. A blend that arrives and never leaves looks correct in every screenshot ever taken
+of it.
+
+**What it deliberately does not touch:** the legs, the pelvis and the spine. A bender leans
+into what they are lifting, and that lean is most of what would sell it — but the pelvis is
+what the gait plants the feet against, and reaching into it before the arms read correctly
+would make one problem into two. The event verbs (`B` and `N`) have no gesture yet either;
+they need an envelope that plays out over time rather than a pose that is held.
+
 ### What the remaining phases are for
 
 Phases 0 to 9 built a world; 10 and 11 gave someone a way to act in it and a reason to. What
@@ -1333,11 +1396,9 @@ moving material sideways is a genuinely new primitive rather than a new call.
 [below](#phase-12--the-bending-vocabulary) as passes A–E: the transport primitive, sweep and
 draw, the ridge, the wall, and the gate that decides how much the ground is willing to give.
 
-**Phase 13 — the bender's body.** Right now the earth moves and the character stands there.
-The gait solver from Phase 7 poses for walking, sprinting and sliding; it has nothing to say
-about commanding terrain, and no amount of substrate work will make bending read until the
-body sells it. This is probably the single largest gap between what this is and what the
-reference looks like.
+**Phase 13 — the bender's body.** Pass A is done and is written up
+[below](#phase-13--the-benders-body): the character now takes a pose per bending verb. The
+gestures are arms only — the lean, the weight shift and the event verbs are what is left.
 
 **Phase 14 — stakes.** A sandbox with no opposition. Weather that undoes the work, ground
 that collapses if undercut, a reason to build one thing rather than another. The substrate

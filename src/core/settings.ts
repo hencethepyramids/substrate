@@ -105,6 +105,7 @@ export const SCHEMA = {
     "sys.embers": bool({ group: "Systems", label: "Embers", def: true }),
     "sys.lightPool": bool({ group: "Systems", label: "Dynamic light pool", def: true }),
     "sys.character": bool({ group: "Systems", label: "Character", def: true }),
+    "sys.gesture": bool({ group: "Systems", label: "Bending gestures", def: true, hint: "Whether the body answers to what the ground is being told. Off leaves the arms to the gait, which is what every phase before 13 looked like." }),
     "sys.cloth": bool({ group: "Systems", label: "Cloth solver", def: true }),
     "sys.displacement": bool({ group: "Systems", label: "Displace terrain by substrate", def: true, hint: "Off leaves the clipmap on the bare heightfield and the buffer as a normal map, which is what Phases 3 to 7 shipped." }),
     "sys.wake": bool({ group: "Systems", label: "Swept wake", def: true }),
@@ -221,6 +222,7 @@ export const SCHEMA = {
     "play.wallLength": num({ group: "Play", label: "Wall length", def: 5, min: 1, max: 16, step: 0.5, unit: "m", hint: "How wide a barrier goes up across your facing. Thrown as two lines growing outward from the centre, so this is the full span and each half is what actually travels." }),
     "play.wallHeight": num({ group: "Play", label: "Wall height", def: 1.3, min: 0.2, max: 3, step: 0.05, unit: "m", hint: "How tall it stands. Same line-integral solve as the ridge — and whether it KEEPS standing is the element's business: snow holds a wall this steep, sand slumps it back toward the angle of repose." }),
     "play.wallRadius": num({ group: "Play", label: "Wall thickness", def: 0.7, min: 0.2, max: 3, step: 0.05, unit: "m", hint: "Half-width of the barrier. Thinner than a ridge on purpose — a wall you can hide behind rather than a bank you can walk up." }),
+    "char.gestureBlend": num({ group: "Character", label: "Gesture blend", def: 11, min: 1, max: 40, step: 0.5, unit: "/s", hint: "How fast the arms take a bending pose and let it go again. A rate rather than a switch in both directions: snapping back on release drops the arms into the walk cycle mid-swing." }),
     "play.wallSpeed": num({ group: "Play", label: "Wall throw speed", def: 12, min: 2, max: 40, step: 0.5, unit: "m/s", hint: "How fast it unzips outward. Faster reads as more sudden right up until it outruns the substrate queue, which lands one stamp per step no matter what this says." }),
 
     "play.digRadius": num({ group: "Play", label: "Dig radius", def: 0.55, min: 0.2, max: 2, step: 0.05, unit: "m" }),

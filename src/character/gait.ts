@@ -4,6 +4,7 @@ import type { Heightfield } from "../terrain/heightfield";
 import type { GroundProbe } from "../substrate/groundProbe";
 import { Skeleton, B, P, THIGH, SHIN, LEG, UPPER_ARM } from "./skeleton";
 import { legPoseAt, type LegPose } from "./gaitCurves";
+import type { GesturePose } from "./gesture";
 
 /**
  * The gait: a solved walk cycle, not an animation.
@@ -88,6 +89,18 @@ const DEG = Math.PI / 180;
 
 export class Gait {
     readonly skeleton = new Skeleton();
+
+    /**
+     * What the body is being asked to DO, as opposed to where it is going. Null until
+     * Phase 13 hands one over, and the arm blend below degrades to the plain swing — so
+     * the gait still solves a complete walk with nothing attached to it.
+     */
+    private _gesture: GesturePose | null = null;
+
+    /** Hand the gait a gesture to blend against its swing. Called once, at wiring time. */
+    setGesture(g: GesturePose): void {
+        this._gesture = g;
+    }
 
     /** This frame's footfalls. Valid for indices below `plantCount`. */
     readonly plants: Plant[] = [];
@@ -607,8 +620,30 @@ export class Gait {
         const neckY = sk.head[B.neck * 3 + 1];
         const neckZ = sk.head[B.neck * 3 + 2];
         const shoulderY = neckY - (P.neckY - P.shoulderY);
-        this._arm(B.upperArmR, B.foreArmR, B.handR, neckX + P.shoulderHalf, shoulderY, neckZ, -swing * wave, elbow, -swing * waveLag);
-        this._arm(B.upperArmL, B.foreArmL, B.handL, neckX - P.shoulderHalf, shoulderY, neckZ, swing * wave, elbow, swing * waveLag);
+
+        // THE GESTURE OWNS THE ARMS TO THE EXTENT IT CLAIMS THEM, and the gait keeps the
+        // rest. Phase 13's poses are commands to the ground rather than parts of a stride,
+        // so they are blended in here rather than added to the swing: a bend held while
+        // walking should hold the arms still, not swing them around a new centre.
+        //
+        // BOTH ARMS TAKE THE SAME ANGLE, where the swing gives them opposite ones. That is
+        // the whole visual difference between walking and commanding — a stride counter-
+        // phases the arms against the legs, and a bender brings them together onto the same
+        // piece of ground.
+        //
+        // The lag goes with it. A held pose has no beat to trail behind, so the forearm's
+        // carried angle blends to the same place the shoulder does; leaving the lag in would
+        // make a still pose jitter at the step frequency of a walk that is not happening.
+        const gw = this._gesture === null ? 0 : this._gesture.weight;
+        const gs = this._gesture === null ? 0 : this._gesture.shoulder;
+        const ge = this._gesture === null ? 0 : this._gesture.elbow;
+        const armR = -swing * wave + (gs - -swing * wave) * gw;
+        const armL = swing * wave + (gs - swing * wave) * gw;
+        const lagR = -swing * waveLag + (gs - -swing * waveLag) * gw;
+        const lagL = swing * waveLag + (gs - swing * waveLag) * gw;
+        const elbowG = elbow + (ge - elbow) * gw;
+        this._arm(B.upperArmR, B.foreArmR, B.handR, neckX + P.shoulderHalf, shoulderY, neckZ, armR, elbowG, lagR);
+        this._arm(B.upperArmL, B.foreArmL, B.handL, neckX - P.shoulderHalf, shoulderY, neckZ, armL, elbowG, lagL);
 
         // --- cloak ----------------------------------------------------------
         // Rides the chest and hangs. Pass E gives it a solver and the wind that already

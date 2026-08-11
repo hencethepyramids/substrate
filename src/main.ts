@@ -31,6 +31,7 @@ import { Airborne } from "./air/airborne";
 import { Fire } from "./fire/fire";
 import { Embers } from "./fire/embers";
 import { Gait } from "./character/gait";
+import { Gesture } from "./character/gesture";
 import { Figure } from "./character/figure";
 import { Cloak } from "./character/cloak";
 import { registerShaderIncludes } from "./shaders/lib/register";
@@ -80,6 +81,7 @@ async function boot(): Promise<void> {
     let embers!: Embers;
     let character!: Figure;
     let gait!: Gait;
+    let gesture!: Gesture;
     let groundProbe!: GroundProbe;
     let airProbe!: AirProbe;
     let cloak!: Cloak;
@@ -144,10 +146,15 @@ async function boot(): Promise<void> {
         // built with the terrain rather than with the mover. The figure needs the gait:
         // its geometry is authored against the rig, and its pose is the gait's palette.
         gait = new Gait(settings, terrain.field);
+        gesture = new Gesture(settings);
         // The CPU window of the substrate. Built after it, handed to the gait, so the feet
         // land on the ground the character has carved rather than on the one beneath it.
         groundProbe = new GroundProbe(scene, settings, substrate);
         gait.setProbe(groundProbe);
+        // The body answers to the verbs, and the gait blends what it says against its own
+        // swing. Wired here rather than constructed inside the gait because the gesture
+        // reads the INPUT and the gait must not — see character/gesture.ts.
+        gait.setGesture(gesture);
         character = new Figure(scene, settings, sky, shadows, gait);
         // The wind where the character is, read through the same include the smoke uses.
         airProbe = new AirProbe(scene, settings, terrain.field, air);
@@ -390,6 +397,9 @@ async function boot(): Promise<void> {
         }
         // After the grounding, because character space is pinned to it, and before the
         // carve pass, which stamps the contacts this decides.
+        // Before the gait, so the arms are blended against THIS frame's pose rather than
+        // last frame's — the same reason the verbs run after the mover has moved.
+        gesture.update(input, simDt);
         gait.update(mover, simDt);
         perf.end(S_GROUND);
 
@@ -502,7 +512,7 @@ async function boot(): Promise<void> {
     // so a harness can drive any view or parameter at runtime instead of reloading the
     // page per experiment — and the wind vector can be read rather than re-derived,
     // which is the difference between checking a sign and asserting one.
-    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake, spray, verbs, goals };
+    (window as unknown as { __substrate?: unknown }).__substrate = { settings, mover, input, rig, air, substrate, airborne, fire, terrain, gait, character, shadows, scene, groundProbe, airProbe, cloak, wake, spray, verbs, goals, gesture };
 
     (window as unknown as { __substrateDispose?: () => void }).__substrateDispose = () => {
         engine.stopRenderLoop();

@@ -129,3 +129,15 @@ Every animation defect this project has had was invisible in a single still.
 
   The scalloping along the snow crest is real and is the seventeen stamps that built it, 0.4
   radii apart.
+
+## Phase 13
+
+- `phase13-raise-before.png` / `phase13-raise-snow.png` — snow, sun 20, the same frame with
+  `sys.gesture` off and on. Same camera, same sun, the same `C` held, the same mound coming
+  up out of the ground in front of the character. In the first the arms hang.
+
+  Both are taken with `--hold`, which presses a key and keeps it down through the shutter.
+  Every other verb flag in the harness presses and releases, which is right for anything that
+  leaves a mark on the ground — the mark outlives the key. A gesture does not.
+- `phase13-sweep-snow.png` — the sweep pose: arms out along the bearing the material is being
+  carried, both on the same side rather than counter-phased.

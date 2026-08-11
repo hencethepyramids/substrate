@@ -655,6 +655,15 @@ if (argv.has("pedestal")) {
 }
 
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
+// HELD THROUGH THE SHUTTER. Every other verb flag here presses and releases, which is
+// right for anything that leaves a mark on the ground — the mark outlives the key. A
+// GESTURE does not: the arms relax back into the gait the moment the key comes up, so a
+// shot of a bending pose has to be taken with the key still down.
+if (argv.has("hold")) {
+    await page.keyboard.down(argv.get("hold"));
+    await page.waitForTimeout(500);
+}
+
 await page.waitForTimeout(settleMs);
 
 mkdirSync(dirname(out), { recursive: true });
