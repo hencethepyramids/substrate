@@ -458,20 +458,29 @@ if (argv.has("build")) {
         };
     });
     for (let i = 0; i < rounds; i++) {
+        // WALK OFF THE SITE TO DIG. The verbs aim at one point in front of the character,
+        // so gathering and placing without moving digs the very hole being filled — which
+        // is exactly what the first run of this did, leaving the site half a metre BELOW
+        // where it started. A borrow pit has to be somewhere else, which is true of real
+        // earthworks and is now true of the harness.
+        if (i > 0) {
+            await page.keyboard.down("s");
+            await page.waitForTimeout(700);
+            await page.keyboard.up("s");
+        }
         await page.keyboard.down("q");
         await page.waitForTimeout(900);
         await page.keyboard.up("q");
+        // Back to the site to unload.
+        await page.keyboard.down("w");
+        await page.waitForTimeout(700);
+        await page.keyboard.up("w");
         // Alternate: place it at your feet, then throw the next one downrange. A throw
         // lands well outside the site radius, so the second half also checks that a load
         // delivered somewhere else is recorded as strayed rather than silently credited.
-        if (i % 2 === 0) {
-            await page.keyboard.down("f");
-            await page.waitForTimeout(1200);
-            await page.keyboard.up("f");
-        } else {
-            await page.keyboard.press("t");
-            await page.waitForTimeout(1600);
-        }
+        await page.keyboard.down("f");
+        await page.waitForTimeout(1200);
+        await page.keyboard.up("f");
     }
     const g = await page.evaluate(() => {
         const a = window.__substrate;
@@ -484,6 +493,9 @@ if (argv.has("build")) {
             landed: a.verbs.landed,
             complete: a.goals.complete,
             calls: window.__calls,
+            peak: a.goals.peakHeight,
+            now: a.goals.height,
+            settled: a.goals.settled,
         };
     });
     // Everything the verbs put on the ground has to appear on the scoreboard as either
@@ -498,6 +510,7 @@ if (argv.has("build")) {
     );
     // Founded exactly once however many loads arrive; complete exactly once if at all.
     const announced = g.calls.founded === 1 && g.calls.complete === (g.complete ? 1 : 0);
+    console.log(`goals: mound peaked at ${g.peak.toFixed(3)} m, now ${g.now.toFixed(3)} m, settled ${(g.settled * 100).toFixed(1)} cm`);
     console.log(
         `goals: announced founded x${g.calls.founded}, complete x${g.calls.complete} ` +
             `(mound ${g.complete ? "finished" : "unfinished"}) ${announced ? "(ONCE EACH)" : "*** REPEATED OR MISSED ***"}`,

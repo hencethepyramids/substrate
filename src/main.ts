@@ -176,11 +176,11 @@ async function boot(): Promise<void> {
         thrown = new Thrown(scene, settings, rig.camera, sky, biome, verbs, Verbs.maxThrown);
         // Phase 11 reads the world's events and adds meaning. Nothing below this line knows
         // it exists; delete the file and the simulation is unchanged.
-        goals = new Goals(settings);
+        goals = new Goals(settings, gait);
         verbs.onDeposit = (x, z, volume) => goals.deposit(x, z, volume);
         // The goal layer reports; the overlay decides that reporting means a toast.
         goals.onFounded = () => overlay.toast("site founded");
-        goals.onComplete = (litres) => overlay.toast(`mound complete - ${litres.toFixed(0)} L`);
+        goals.onComplete = (metres) => overlay.toast(`mound complete - ${metres.toFixed(2)} m tall`);
         sky.setFarStart(terrain.stats.halfExtent, terrain.field.originX, terrain.field.originZ, terrain.field.extent);
         console.info(`[substrate] clipmap: ${terrain.stats.triangles.toLocaleString()} tris, ${terrain.stats.vertices.toLocaleString()} verts, ${(terrain.stats.bytes / 1048576).toFixed(2)} MB, radius ${terrain.stats.halfExtent.toFixed(0)} m`);
         console.info(`[substrate] figure: ${character.stats.triangles.toLocaleString()} tris, ${character.stats.vertices.toLocaleString()} verts over 18 bones`);
@@ -280,8 +280,8 @@ async function boot(): Promise<void> {
         // it fills, where the cubic-metre figure would be four leading zeros.
         overlay.addCounter("mound", () => {
             if (!goals.started) return "no site yet";
-            const litres = (goals.delivered * 1000).toFixed(0);
-            if (goals.complete) return `complete (${litres} L)`;
+            const tall = `${goals.peakHeight.toFixed(2)} m`;
+            if (goals.complete) return `complete (${tall})`;
             // HOW FAR AWAY THE SITE IS, once you have walked off it. The site is invisible
             // — nothing marks it and the first deposit founded it wherever the player
             // happened to be standing — so without this the only way to find it again is to
@@ -289,8 +289,10 @@ async function boot(): Promise<void> {
             // nothing is noise while you are standing on the thing.
             const d = goals.distanceFrom(mover.position.x, mover.position.z);
             const away = d > goals.siteRadius ? `, ${d.toFixed(0)} m away` : "";
-            const stray = goals.strayed > 0 ? `, ${(goals.strayed * 1000).toFixed(0)} L strayed` : "";
-            return `${(goals.progress * 100).toFixed(0)}% (${litres} L)${away}${stray}`;
+            // Only once it has actually dropped, and in centimetres, because a settling
+            // of two millimetres is not news.
+            const lost = goals.settled > 0.02 ? `, settled ${(goals.settled * 100).toFixed(0)} cm` : "";
+            return `${(goals.progress * 100).toFixed(0)}% (${tall})${away}${lost}`;
         });
         overlay.addCounter("carrying", () => {
             const litres = verbs.carried * 1000;
@@ -392,6 +394,8 @@ async function boot(): Promise<void> {
         // After the verbs, so the quads carry this frame's positions rather than last
         // frame's — at 9 m/s that is 15 cm of visible lag on every throw.
         thrown.update();
+        // After the verbs and the substrate step, so the pile is measured as it stands now.
+        goals.update();
         perf.end(S_CAMERA);
 
         // Before the scene render, not inside it: a rebake binds its own target, and

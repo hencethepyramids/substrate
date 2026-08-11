@@ -1,5 +1,10 @@
 import type { Settings } from "../core/settings";
 
+/** Ground height, for measuring what is actually standing there. */
+export interface Heights {
+    groundAt(x: number, z: number): number;
+}
+
 /**
  * The game layer — rules laid over a world that does not need them.
  *
@@ -18,12 +23,18 @@ import type { Settings } from "../core/settings";
  * that stalls the frame to find out how it is doing would be paying for its own scoreboard
  * in frame time.
  *
- * THE FIRST GOAL IS A MOUND, because it is the one thing this world's verbs are already
- * good at and because it is honest about the trade. Volume deposited near a point is not
- * the same as volume STILL near that point — snow slumps, and a tall pile becomes a wide
- * one within a few relaxation steps. So this counts what was delivered rather than what
- * survives, and says so. Scoring what survives needs the buffer read back, which is a
- * later problem with a real cost attached.
+ * THE FIRST GOAL IS A MOUND, and it is scored by HOW TALL IT IS rather than by how much
+ * was tipped into it. Pass A did the latter and said so, on the reasoning that measuring
+ * what survives meant reading the substrate buffer back and paying a stall for it. That was
+ * wrong, and pleasantly so: gait.groundAt() already returns the deformed surface — it is
+ * what the character's feet stand on, it is what measured a dug hole at 26 cm, and it is
+ * already called every frame. The height of the pile was free the whole time.
+ *
+ * WHICH MAKES THE SIMULATION THE GAME. Snow slumps at its angle of repose, so a mound
+ * fights back: tip material faster than it settles and the pile grows, stop and it spreads.
+ * Delivered volume is still counted, but only as a statistic, and the gap between it and
+ * the height is the interesting number — it is how much of the work the ground took back.
+ * A goal scored on delivery could be finished by shovelling into a hole. This one cannot.
  */
 
 /** How far from the site a deposit still counts as part of it, in metres. */
@@ -38,6 +49,12 @@ export class Goals {
     delivered = 0;
     /** Volume that missed — deposited, but not near the site. Worth seeing. */
     strayed = 0;
+    /** Ground height at the site when it was founded, in metres. The datum. */
+    baseHeight = 0;
+    /** How far the ground at the site now stands above that datum. */
+    height = 0;
+    /** The tallest it has ever been, which is what the goal is scored against. */
+    peakHeight = 0;
     /** True once `delivered` reaches the target. Latches; a mound is not un-built. */
     complete = false;
 
@@ -57,9 +74,31 @@ export class Goals {
     onComplete: ((litres: number) => void) | null = null;
 
     private readonly _settings: Settings;
+    private readonly _heights: Heights;
 
-    constructor(settings: Settings) {
+    constructor(settings: Settings, heights: Heights) {
         this._settings = settings;
+        this._heights = heights;
+    }
+
+    /**
+     * Measure the pile. Called once a frame; allocates nothing.
+     *
+     * SCORED ON THE PEAK, NOT THE CURRENT HEIGHT, and that is a deliberate kindness rather
+     * than an oversight. Snow keeps creeping for several seconds after the last shovelful,
+     * so a mound scored on its instantaneous height would be finished and then unfinished
+     * again while the player stood watching it. The peak latches what was actually built;
+     * `height` is still reported alongside it, so the settling is visible rather than
+     * hidden — which is the part worth watching.
+     */
+    update(): void {
+        if (!this.started || !(this._settings.v["sys.goals"] as boolean)) return;
+        this.height = this._heights.groundAt(this.site.x, this.site.z) - this.baseHeight;
+        if (this.height > this.peakHeight) this.peakHeight = this.height;
+        if (!this.complete && this.progress >= 1) {
+            this.complete = true;
+            this.onComplete?.(this.peakHeight);
+        }
     }
 
     /** Metres from a point to the current site, or -1 if there is no site yet. */
@@ -73,10 +112,25 @@ export class Goals {
         return SITE_RADIUS;
     }
 
-    /** Fraction of the target delivered, clamped to 1. */
+    /** Fraction of the target height reached, clamped to 1. */
     get progress(): number {
-        const target = (this._settings.v["goal.moundLitres"] as number) / 1000;
-        return target > 0 ? Math.min(this.delivered / target, 1) : 0;
+        const target = this._settings.v["goal.moundHeight"] as number;
+        return target > 0 ? Math.min(this.peakHeight / target, 1) : 0;
+    }
+
+    /**
+     * How far the pile has settled from its own high-water mark, in metres.
+     *
+     * A MEASUREMENT, NOT A MODEL. An earlier version of this compared the peak against what
+     * the delivered volume "should" have stood as, using a made-up spread area — and it
+     * duly reported 0% settling for a site that had collapsed into a hole, because the
+     * invented denominator happened to come out smaller than the peak. A number that reads
+     * healthy while the thing it describes has failed is worse than no number, so it is
+     * gone. This subtracts two heights that were both actually measured, and cannot say
+     * anything that is not true of the ground.
+     */
+    get settled(): number {
+        return Math.max(0, this.peakHeight - this.height);
     }
 
     /**
@@ -96,6 +150,10 @@ export class Goals {
             this.started = true;
             this.site.x = x;
             this.site.z = z;
+            // The datum, taken BEFORE this deposit has had a chance to settle into the
+            // buffer. Taken after, the first shovelful would measure as zero height and
+            // every mound would read one load short.
+            this.baseHeight = this._heights.groundAt(x, z);
             this.onFounded?.(x, z);
         }
 
@@ -107,10 +165,6 @@ export class Goals {
         }
 
         this.delivered += volume;
-        if (!this.complete && this.progress >= 1) {
-            this.complete = true;
-            this.onComplete?.(this.delivered * 1000);
-        }
     }
 
     /** Start again. The overlay hangs a button off this. */
@@ -119,5 +173,8 @@ export class Goals {
         this.delivered = 0;
         this.strayed = 0;
         this.complete = false;
+        this.baseHeight = 0;
+        this.height = 0;
+        this.peakHeight = 0;
     }
 }
