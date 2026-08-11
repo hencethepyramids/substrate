@@ -91,8 +91,11 @@ between "builds" and "the driver will accept this".
 | 7 — character | **done** |
 | 8 — traversal and wakes | **done** |
 | 9 — post | **done** |
-| 10 — interactions | in progress — verbs A-D |
-| 11 — game layer | not started |
+| 10 — interactions | **done** |
+| 11 — game layer | **done** |
+| 12 — the bending vocabulary | not started |
+| 13 — the bender's body | not started |
+| 14 — stakes | not started |
 
 ### Phase 0 acceptance
 
@@ -987,6 +990,32 @@ lock is not available to a headless run.
 | `F` | place — held. Puts it back as a loose heap, free to slump at the angle of repose |
 | `R` | pack — held. Treads the ground down. Moves no material at all: compaction drives roughness, so a packed patch is what the screen-space reflections actually show |
 | `T` | throw — launches what you are carrying on a ballistic arc. The volume travels with the projectile, so the books balance mid-flight as well as at the ends |
+| `space` | leap — a real vertical solver, apex 1.4 m from a standing start. The landing craters the snow in proportion to how hard it was |
+
+**Bending** (Phase 10 passes F–G). A different grammar from the carrying verbs above: the
+terrain moves because it is told to, nothing is held, and there is no capacity. All of it
+runs through `substrate.stamp()`, which has been volume-neutral since Phase 3 — driven with
+negative depth it raises instead of pressing.
+
+| | |
+| --- | --- |
+| `C` | raise the ground you are aiming at |
+| `V` | lower it |
+| `G` | pedestal — raise the ground under your own feet and ride it up |
+
+The pedestal is worth describing because nothing implements it. The mover snaps to the
+surface every frame it is grounded, so when the surface rises the character rises with it;
+and because the leap reads the height the feet are actually at, a jump from the top of a
+pedestal is a jump from the top of a pedestal. Measured: rode 154 cm up, leapt from there to
+215 cm above the flat. Two passes built for their own reasons compose into a move neither
+of them mentions.
+
+In snow, raising ground draws from COMPACTION rather than from a ring around it — the stamp
+drives that channel too, and lifting fluffs the material back up. A probe caught this
+correcting a comment that had claimed the opposite: the centre rose 83 cm and the ring did
+not move at all, because `srStamped` scales the rim by `(1 - cohesion)` and snow is
+cohesive. In dry sand the same call scars. Neither behaviour is written in the game layer;
+both fall out of the element.
 
 Gather, place and throw all move the same conserved quantity. `substrate.stamp()` is
 volume-neutral by construction — a footprint heaps up exactly what it pushes down — so
@@ -995,8 +1024,30 @@ cubic metres and solves for the amplitude from the kernel's closed-form integral
 makes conservation a property of the interface rather than something a probe has to measure
 afterwards.
 
-The thrown projectile is not drawn yet. It is a real trajectory with a real impact and
-nothing in the air to look at.
+### What the remaining phases are for
+
+Phases 0 to 9 built a world; 10 and 11 gave someone a way to act in it and a reason to. What
+is left is the part the project is actually named for — the character is meant to be a
+**bender of the terrain they are standing on**, and Phase 10 delivered the primitive for
+that in its last two passes rather than the vocabulary.
+
+**Phase 12 — the bending vocabulary.** Raise, lower and pedestal all act on one spot. The
+moves that read as bending act on a *shape*: a ridge travelling away from you, a drift swept
+aside, a wall thrown up along a line, material pulled toward you. Only the first of those is
+cheap — a moving stamp over time. The rest need something the substrate does not have, which
+is DIRECTIONAL TRANSPORT: every operation so far is radially symmetric about a point, and
+moving material sideways is a genuinely new primitive rather than a new call.
+
+**Phase 13 — the bender's body.** Right now the earth moves and the character stands there.
+The gait solver from Phase 7 poses for walking, sprinting and sliding; it has nothing to say
+about commanding terrain, and no amount of substrate work will make bending read until the
+body sells it. This is probably the single largest gap between what this is and what the
+reference looks like.
+
+**Phase 14 — stakes.** A sandbox with no opposition. Weather that undoes the work, ground
+that collapses if undercut, a reason to build one thing rather than another. The substrate
+already models everything needed for the first two and the goal layer already scores what
+survives rather than what was delivered, which is the hook these hang on.
 
 ---
 

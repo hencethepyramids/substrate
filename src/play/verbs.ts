@@ -24,10 +24,11 @@ export interface Heights {
     groundAt(x: number, z: number): number;
 }
 
-/** Where the player is and which way they are pointed. */
+/** Where the player is, which way they are pointed, and whether their feet are down. */
 export interface Actor {
     readonly position: { x: number; y: number; z: number };
     readonly facing: number;
+    readonly airborne: boolean;
 }
 
 /**
@@ -241,6 +242,27 @@ export class Verbs {
         } else if (input.lower) {
             this._ground.stamp(this.target.x, this.target.z, bendRadius, bend);
             this.bent += bend;
+        }
+
+        // THE PEDESTAL: raise the ground under your own feet and ride it up.
+        //
+        // This is the move the whole idea was for, and it is assembled entirely out of
+        // parts that already existed. The bend above commands terrain at arm's length; this
+        // is the same call aimed at the character's own position. Nothing lifts the
+        // character - the mover snaps position.y to the surface every frame it is grounded,
+        // so when the surface comes up, the character comes up with it, for free and
+        // without a single line of code that knows a person is standing there.
+        //
+        // AND THE LEAP OFF THE TOP IS FREE TOO. Pass F gave the mover real vertical motion,
+        // so a jump from a two-metre pedestal is a jump from two metres - the height is not
+        // scripted anywhere, it is just where the feet happen to be. Two passes that were
+        // built for their own reasons compose into a move neither of them mentions.
+        //
+        // Blocked while airborne, because a pedestal is pushed with the legs against ground
+        // that is under them. In the air there is nothing to push.
+        if (input.pedestal && !actor.airborne) {
+            this._ground.stamp(actor.position.x, actor.position.z, this._settings.v["play.pedestalRadius"] as number, -(this._settings.v["play.bendRate"] as number) * dt);
+            this.bent += (this._settings.v["play.bendRate"] as number) * dt;
         }
 
         const radius = this._settings.v["play.digRadius"] as number;

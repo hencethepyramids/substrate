@@ -209,6 +209,7 @@ export const SCHEMA = {
     "play.landImpact": num({ group: "Play", label: "Landing crater", def: 0.035, min: 0, max: 0.2, step: 0.005, unit: "m per m/s", hint: "How deep a landing punches into the ground, per metre per second of impact. The crater is a real volume-neutral stamp, so it heaps a rim like any other." }),
     "play.bendRadius": num({ group: "Play", label: "Bend radius", def: 1.8, min: 0.4, max: 6, step: 0.1, unit: "m", hint: "How wide a patch of ground answers. The rim it draws material from scales with this, so a wide bend leaves a wide scar." }),
     "play.bendRate": num({ group: "Play", label: "Bend rate", def: 1.1, min: 0.1, max: 5, step: 0.05, unit: "m/s", hint: "How fast the terrain rises or falls while held. Volume-neutral: raised snow is taken from a ring around it, and that ring is the evidence of where it came from." }),
+    "play.pedestalRadius": num({ group: "Play", label: "Pedestal radius", def: 1.1, min: 0.5, max: 4, step: 0.1, unit: "m", hint: "How wide the ground is that rises under you. Narrow is a column and hard to stay on as it steepens; wide is a hill and costs more material to lift." }),
     "play.reach": num({ group: "Play", label: "Reach", def: 1.6, min: 0.5, max: 4, step: 0.1, unit: "m", hint: "How far in front of the character a verb lands. This is arm's length, not a cursor: a third-person camera has no cursor, and pointer lock is not available to a headless run." }),
 
     "play.digRadius": num({ group: "Play", label: "Dig radius", def: 0.55, min: 0.2, max: 2, step: 0.05, unit: "m" }),

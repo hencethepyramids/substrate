@@ -54,6 +54,8 @@ export class Input {
      */
     raise = false;
     lower = false;
+    /** Held - raise the ground under your own feet and ride it. */
+    pedestal = false;
     /** Pressed this frame - throw what is carried. An event, like ignite. */
     throwIt = false;
     /** Pressed this frame - leave the ground. */
@@ -171,6 +173,7 @@ export class Input {
         this.pack = this._down.has("KeyR");
         this.raise = this._down.has("KeyC");
         this.lower = this._down.has("KeyV");
+        this.pedestal = this._down.has("KeyG");
     }
 
     /** Zero the accumulated deltas. Call at the bottom of the frame, after everything has read them. */

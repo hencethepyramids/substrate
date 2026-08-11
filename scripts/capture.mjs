@@ -559,6 +559,26 @@ if (argv.has("bend")) {
     );
 }
 
+// THE PEDESTAL, AND THE LEAP OFF IT. Two claims: the character rides the ground it raises,
+// and a jump from the top clears more than a jump from the flat. The second is the one
+// worth measuring, because nothing anywhere adds the pedestal height to the jump - if it
+// composes, it composes because the mover reads the surface it is actually standing on.
+if (argv.has("pedestal")) {
+    const ms = Number(argv.get("pedestal")) || 1400;
+    const base = await page.evaluate(() => window.__substrate.mover.position.y);
+    await page.keyboard.down("g");
+    await page.waitForTimeout(ms);
+    await page.keyboard.up("g");
+    const top = await page.evaluate(() => window.__substrate.mover.position.y);
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(130);
+    const air = await page.evaluate(() => ({ y: window.__substrate.mover.position.y, up: window.__substrate.mover.airborne }));
+    console.log(
+        `pedestal: rode ${((top - base) * 100).toFixed(1)} cm up, leapt from there to ${((air.y - base) * 100).toFixed(1)} cm above the flat ` +
+            `(airborne ${air.up}) ${top - base > 0.3 && air.y > top ? "(RODE IT, THEN LAUNCHED)" : "*** did not compose ***"}`,
+    );
+}
+
 // Let the sky bake, the substrate settle and a few frames of wind blow through.
 await page.waitForTimeout(settleMs);
 
