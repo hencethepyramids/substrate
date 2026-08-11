@@ -666,6 +666,19 @@ if (argv.has("hold")) {
 
 await page.waitForTimeout(settleMs);
 
+// A STRUCK GESTURE HAS TO BE PHOTOGRAPHED ON A CLOCK. `--hold` works for a pose that is
+// held; a strike is over in half a second whether anyone is holding anything or not, so the
+// press has to happen AFTER the world has settled and the shutter has to fall inside the
+// envelope. `--strike=b --at=110` presses B and shoots 110 ms later, just past the 90 ms
+// attack — the top of the blow. It reports the weight it caught, because a shot taken a
+// beat late looks like a pose that is simply wrong.
+if (argv.has("strike")) {
+    await page.keyboard.press(argv.get("strike"));
+    await page.waitForTimeout(Number(argv.get("at") ?? 110));
+    const g = await page.evaluate(() => ({ w: window.__substrate.gesture.weight, a: window.__substrate.gesture.active }));
+    console.log(`gesture: caught "${g.a ?? "none"}" at weight ${g.w.toFixed(3)}`);
+}
+
 mkdirSync(dirname(out), { recursive: true });
 await page.screenshot({ path: out });
 

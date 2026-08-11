@@ -36,6 +36,17 @@ export interface Commanding {
     readonly raise: boolean;
     readonly lower: boolean;
     readonly pedestal: boolean;
+    /**
+     * The two that are EVENTS rather than states, true for the single frame of the press.
+     *
+     * They are the reason this module needed a second mechanism. Everything above is a
+     * question the body can be asked every frame — "are you still lowering?" — and the
+     * answer drives a pose that is simply held. A ridge and a wall are launched: the input
+     * is gone by the next frame while the thing it started runs for another second, and
+     * there is nothing left to ask. The body has to remember it struck.
+     */
+    readonly ridge: boolean;
+    readonly wall: boolean;
 }
 
 /** What the gait blends against its own arm swing. Angles are radians. */
@@ -74,10 +85,36 @@ const POSES: Record<keyof Commanding, { shoulder: number; elbow: number }> = {
     // Riding your own pillar up. Arms down and slightly back, pushing against the ground
     // that is lifting you — the one pose where the hands do NOT lead.
     pedestal: { shoulder: -24 * DEG, elbow: 12 * DEG },
+    // Driving a wave away from you: both arms punched out along the bearing, elbows nearly
+    // locked. The follow-through of a shove rather than the carry of one.
+    ridge: { shoulder: 101 * DEG, elbow: 7 * DEG },
+    // Throwing a barrier up: arms hurled overhead, which is the highest the hands go of
+    // anything here — and has to be, because the wall is the tallest thing they make.
+    wall: { shoulder: 158 * DEG, elbow: 22 * DEG },
 };
 
-/** Order matters only when two are held at once; the first one wins. */
+/** Held poses, in priority order. The first one down wins if two are. */
 const ORDER: (keyof Commanding)[] = ["pedestal", "raise", "lower", "sweep", "draw"];
+
+/** The two that fire and play out. Checked separately: an event is not a state. */
+const EVENTS: (keyof Commanding)[] = ["ridge", "wall"];
+
+/**
+ * Seconds a struck gesture takes to reach the pose and to let it go.
+ *
+ * A STRIKE IS FAST IN AND SLOW OUT. Both halves being equal reads as a wave rather than a
+ * blow — the thing that makes a hit land is that the arm gets there in a couple of frames
+ * and comes back over a beat. 90 ms is about three frames at sixty; the recovery is roughly
+ * the time the ridge takes to travel its first few metres, so the body is still following
+ * through while the wave is visibly leaving.
+ */
+const STRIKE_IN = 0.09;
+const STRIKE_OUT = 0.42;
+
+function smoothstep(t: number): number {
+    const x = t < 0 ? 0 : t > 1 ? 1 : t;
+    return x * x * (3 - 2 * x);
+}
 
 export class Gesture implements GesturePose {
     weight = 0;
@@ -90,6 +127,9 @@ export class Gesture implements GesturePose {
     /** Held between frames so a released gesture relaxes from where it was, not from rest. */
     private _shoulder = 0;
     private _elbow = 0;
+    /** The strike currently playing out, and how far into it. Null between blows. */
+    private _strike: keyof Commanding | null = null;
+    private _strikeT = 0;
 
     constructor(settings: Settings) {
         this._settings = settings;
@@ -109,7 +149,23 @@ export class Gesture implements GesturePose {
         if (!(this._settings.v["sys.gesture"] as boolean)) {
             this.weight = 0;
             this.active = null;
+            this._strike = null;
             return;
+        }
+
+        // Clamped for the reason every other integrator here clamps: a hitch should slow the
+        // gesture, not teleport the arms through the chest.
+        const step = Math.min(dt, 1 / 30);
+
+        // A NEW STRIKE ALWAYS RESTARTS THE ENVELOPE, even if one is still playing. Two
+        // ridges thrown in quick succession are two throws, and a body that ignored the
+        // second until the first had finished would drop the input on the floor — which is
+        // exactly the complaint every game with a queued attack animation gets.
+        for (const e of EVENTS) {
+            if (cmd[e]) {
+                this._strike = e;
+                this._strikeT = 0;
+            }
         }
 
         let next: keyof Commanding | null = null;
@@ -119,11 +175,36 @@ export class Gesture implements GesturePose {
                 break;
             }
         }
-        this.active = next;
 
-        // Clamped for the reason every other integrator here clamps: a hitch should slow the
-        // gesture, not teleport the arms through the chest.
-        const step = Math.min(dt, 1 / 30);
+        // THE STRIKE OUTRANKS ANYTHING HELD, and while it plays the envelope owns the weight
+        // outright rather than chasing it. That is the whole difference between the two
+        // mechanisms: a held pose asks how far in it should be and eases toward the answer,
+        // a struck one is on a clock and its shape is not negotiable. Easing a strike is how
+        // a punch turns into a stretch.
+        if (this._strike !== null) {
+            this._strikeT += step;
+            const t = this._strikeT;
+            const env = t < STRIKE_IN ? smoothstep(t / STRIKE_IN) : 1 - smoothstep((t - STRIKE_IN) / STRIKE_OUT);
+            if (env <= 0) {
+                this._strike = null;
+                this._strikeT = 0;
+            } else {
+                const pose = POSES[this._strike];
+                this.active = this._strike;
+                this.weight = env;
+                // The ANGLES snap to the struck pose rather than easing into it. The
+                // envelope is already doing the easing, on the blend against the gait — so
+                // easing here as well would round off the leading edge twice and the strike
+                // would arrive late and soft.
+                this._shoulder = pose.shoulder;
+                this._elbow = pose.elbow;
+                this.shoulder = this._shoulder;
+                this.elbow = this._elbow;
+                return;
+            }
+        }
+
+        this.active = next;
         const rate = this._settings.v["char.gestureBlend"] as number;
         const k = 1 - Math.exp(-rate * step);
 

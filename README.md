@@ -1375,8 +1375,48 @@ of it.
 **What it deliberately does not touch:** the legs, the pelvis and the spine. A bender leans
 into what they are lifting, and that lean is most of what would sell it — but the pelvis is
 what the gait plants the feet against, and reaching into it before the arms read correctly
-would make one problem into two. The event verbs (`B` and `N`) have no gesture yet either;
-they need an envelope that plays out over time rather than a pose that is held.
+would make one problem into two.
+
+### Pass B: a blow, which is not a pose
+
+`B` and `N` are **events**. The key is up again by the next frame while the thing it launched
+runs for another second, so there is nothing left to ask — "are you still ridging?" has no
+answer. The held mechanism above cannot express them at all: it reads the input every frame
+and would see nothing. The body has to *remember it struck*.
+
+So a strike runs on a clock rather than chasing a target. **Fast in, slow out** — 90 ms to
+arrive, 420 ms to recover. Both halves equal reads as a wave rather than a blow; what makes a
+hit land is that the arm gets there in about three frames and comes back over a beat. And
+while it plays, the envelope owns the blend outright instead of easing toward it, because
+easing a strike is how a punch turns into a stretch.
+
+A new strike always restarts the envelope even if one is still playing. Two ridges thrown in
+quick succession are two throws, and a body that ignored the second until the first finished
+would drop the input on the floor.
+
+The probe samples a single press every 40 ms with the key up the whole time, because every
+way this fails is a *shape* rather than a value:
+
+```
+  ridge  0499875421000000000000
+  wall   0599875421000000000000
+```
+
+A strike wired to the held path would read all zeros — the key is gone before the next frame
+looks at it. One that never released would look perfect in any still and leave the arms
+overhead forever. One easing in on a rate would arrive late and soft, which is why the second
+sample is checked as well as the peak: at 40 ms against a 90 ms attack it cannot be near zero
+unless the clock has been replaced by a rate.
+
+Measured: both peak at 1.000 from one press, both settle to 0.000 with nothing held, and the
+wall throws the hands to 1.93 m against the ridge's 1.52 m — it has to be the highest pose
+here, because the wall is the tallest thing the verbs make.
+
+[phase13-wall-strike.png](shots/phase13-wall-strike.png) is the top of that blow, caught at
+weight 0.980 by `--strike=n --at=115`; [phase13-ridge-strike.png](shots/phase13-ridge-strike.png)
+is the ridge's, arms punched out along the bearing with the crest already running away.
+
+The event verbs are done. The **lean** is what is left in this phase.
 
 ### What the remaining phases are for
 

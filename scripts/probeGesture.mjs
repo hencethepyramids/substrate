@@ -85,6 +85,36 @@ for (const [name, key] of Object.entries(KEYS)) {
     poses[name].released = await read();
 }
 
+// -- the struck gestures -----------------------------------------------------------------
+//
+// The ridge and the wall are EVENTS: the key is up again by the next frame while the thing
+// it launched runs for another second. So the claim is not "the pose is held while the key
+// is" — there is nothing to hold — it is that a single press produces a blow that arrives
+// and then leaves ON ITS OWN.
+//
+// SAMPLED THROUGH TIME RATHER THAN AT A MOMENT, because every way this can fail is a shape
+// rather than a value. A strike wired to the held path would sit at zero (the key is gone
+// before the next frame reads it). One that never releases would look perfect in a still and
+// leave the arms overhead forever. One easing in on a rate instead of a clock would arrive
+// late and soft, which is exactly how a punch turns into a stretch — and reads as "the
+// animation is fine" to anything sampling a single frame.
+const strikes = {};
+for (const [name, key] of [
+    ["ridge", "b"],
+    ["wall", "n"],
+]) {
+    await settle(700);
+    const trace = [];
+    await page.keyboard.press(key);
+    for (let i = 0; i < 22; i++) {
+        trace.push(await read());
+        await settle(40);
+    }
+    let peak = trace[0];
+    for (const t of trace) if (t.weight > peak.weight) peak = t;
+    strikes[name] = { trace, peak, rest: await read() };
+}
+
 await browser.close();
 
 const f = (v) => (v >= 0 ? " " : "") + v.toFixed(3);
@@ -139,9 +169,32 @@ for (const [name, p] of Object.entries(poses)) {
 }
 
 console.log("");
+console.log("struck gestures — one press, sampled every 40 ms; the key is up the whole time");
+for (const [name, s] of Object.entries(strikes)) {
+    const spark = s.trace.map((t) => "0123456789"[Math.min(9, Math.round(t.weight * 9))]).join("");
+    console.log(`  ${name.padEnd(6)} ${spark}`);
+    console.log(`         peak weight ${s.peak.weight.toFixed(3)} with hands at y ${f(s.peak.y)}, settles to ${s.rest.weight.toFixed(3)}`);
+}
+console.log("");
+
+for (const [name, s] of Object.entries(strikes)) {
+    // It happened at all — the defining failure being that an event wired to the held path
+    // never fires, because the key is gone before the next frame looks at it.
+    claim(s.peak.weight > 0.85, `${name} strikes from a single press (peak ${s.peak.weight.toFixed(3)})`);
+    // And it ended on its own, which nothing but a time sample can see.
+    claim(s.rest.weight < 0.05, `${name} recovers with no key held (${s.rest.weight.toFixed(3)})`);
+    // Fast in, slow out. The first sample after the press should already be most of the way
+    // there; at 40 ms against a 90 ms attack it cannot be near zero unless the strike is
+    // easing on a rate instead of running on a clock.
+    claim(s.trace[1].weight > 0.25, `${name} arrives fast rather than easing in (${s.trace[1].weight.toFixed(3)} at 40 ms)`);
+}
+// The wall is the tallest thing the verbs make, so it is the pose whose hands go highest.
+claim(strikes.wall.peak.y > strikes.ridge.peak.y + 0.1, `the wall throws the hands higher than the ridge (${f(strikes.wall.peak.y)} vs ${f(strikes.ridge.peak.y)})`);
+
+console.log("");
 if (bad === 0) {
-    console.log("ok — every verb moves the body, each pose means what it is called, and the arms");
-    console.log("come back to the gait when the key comes up.");
+    console.log("ok — every verb moves the body, each pose means what it is called, held poses");
+    console.log("come back when the key comes up, and struck ones come back on their own.");
 } else {
     console.log(`${bad} failure(s)`);
     process.exitCode = 1;

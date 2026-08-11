@@ -141,3 +141,12 @@ Every animation defect this project has had was invisible in a single still.
   leaves a mark on the ground — the mark outlives the key. A gesture does not.
 - `phase13-sweep-snow.png` — the sweep pose: arms out along the bearing the material is being
   carried, both on the same side rather than counter-phased.
+- `phase13-ridge-strike.png` / `phase13-wall-strike.png` — the two struck gestures, caught
+  115 ms after the press: just past the 90 ms attack, at the top of the blow. The ridge
+  punches the arms out along the bearing with its crest already running away; the wall hurls
+  them overhead with the barrier standing beside the character.
+
+  Taken with `--strike=<key> --at=<ms>`, which presses AFTER the world has settled and shoots
+  on a clock — a held gesture can be photographed at leisure, a strike is over in half a
+  second. The harness prints the weight it actually caught (0.985 and 0.980), because a shot
+  taken a beat late looks like a pose that is simply wrong.
