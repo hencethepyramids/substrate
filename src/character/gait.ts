@@ -537,7 +537,19 @@ export class Gait {
         // into speed: the line from your feet through your centre of mass has to stay
         // over the ground you are pushing against.
         const climb = clampAbs(this._slopeAlong(this._px, this._pz, this._sin, this._cos, 0.5), 0.8);
-        const leanZ = (Math.tan(s["char.lean"] * DEG) * (0.35 + 1.6 * this._run) * moving + climb * 0.32) * 1;
+        // THE GESTURE LEANS THE TORSO, AND ONLY THE TORSO. leanZ is spent through the spine
+        // chain below and is read by nothing in the leg solve — the hips come off `leanX`,
+        // `pelvisY` and the sway, none of which this touches. That is the whole reason a
+        // bending lean can be added here at all: a lean that started at the ankles would move
+        // the pelvis, and every planted foot would go with it, which is the one thing Phase 7
+        // exists to prevent. From the waist up costs the feet nothing and buys most of the
+        // read, because what sells a body committing to something is the chest and the head.
+        //
+        // Added as a TANGENT because that is what leanZ is — a slope, dz per unit dy, not an
+        // angle. The pose table states degrees and converts here, which keeps the one place
+        // that knows about the units next to the one that knows about the chain.
+        const gLean = this._gesture === null ? 0 : Math.tan(this._gesture.lean) * this._gesture.weight;
+        const leanZ = (Math.tan(s["char.lean"] * DEG) * (0.35 + 1.6 * this._run) * moving + climb * 0.32) * 1 + gLean;
         const leanX = clampAbs((mover.speed * this._turn) / G, 0.55) * s["char.bank"];
 
         // NEVER ASK A LEG FOR MORE THAN IT HAS. The bob above is the flat-ground case of a

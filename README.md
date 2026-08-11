@@ -1416,7 +1416,53 @@ here, because the wall is the tallest thing the verbs make.
 weight 0.980 by `--strike=n --at=115`; [phase13-ridge-strike.png](shots/phase13-ridge-strike.png)
 is the ridge's, arms punched out along the bearing with the crest already running away.
 
-The event verbs are done. The **lean** is what is left in this phase.
+### Pass C: leaning from the waist up
+
+A bender leans into what they are lifting, and that lean is most of what sells it. It is also
+the one change in this phase that could break something older than itself: **the gait plants
+its feet in world space**, and the whole of Phase 7 rests on a planted foot not moving. A lean
+built from the ankles pitches the pelvis, and every planted foot goes with it.
+
+So the lean is spent through the spine **above** the pelvis. The gait already chains the torso
+off a `leanZ` slope — each segment leaning less than the one below, so the head arrives nearly
+upright — and the leg solve reads none of it: the hips come off `leanX`, `pelvisY` and the
+sway. Adding a gesture term to `leanZ` therefore costs the feet nothing and buys almost all of
+the read, because what sells a body committing to something is the chest and the head, not the
+shins. The arms ride it for free, being positioned from the neck.
+
+| | lean | chest z | feet moved |
+| --- | --- | --- | --- |
+| raise | −9° | −0.033 | 4.76 mm |
+| lower | +14° | +0.056 | 4.78 mm |
+| sweep | +16° | +0.064 | 4.81 mm |
+| draw | −13° | −0.049 | 4.91 mm |
+| pedestal | +7° | +0.028 | 4.94 mm |
+| ridge | +23° | — | — |
+| wall | −17° | — | — |
+
+**The last column is the pass**, and it only means anything next to the row underneath it:
+*the same interval with no key held moves the feet 4.67 mm*. The character drifts a few
+millimetres a second standing still — it is on a slope and gravity does what gravity does —
+so "the ankle moved" is evidence about the lean only if it moved more than it was going to
+anyway. The lean costs the feet between 0.1 and 0.3 mm over that floor. A lean that had
+reached the leg solve would move them by centimetres.
+
+Two earlier versions of this measurement were wrong, both by measuring the wrong thing:
+
+- the first held `C`, which **raises the ground the character is standing next to**, tilts it,
+  and moves them — so a 240 mm "foot slide" was the player sliding down a hill they had just
+  built. The probe now runs with `sys.verbs` off; `sys.gesture` is independent of it.
+- the second measured ankles in **character space**, which is pinned to the body — so the
+  idle sway moving the pelvis by a centimetre read as the feet sliding. World space is where
+  Phase 7 states the guarantee, so it is the frame the claim belongs in.
+
+`checkGait`'s six claims still pass, which is the independent confirmation that none of this
+reached the legs.
+
+[phase13-ridge-strike.png](shots/phase13-ridge-strike.png) is the biggest lean in the table —
+the whole torso pitched into the throw at the top of the blow, cape trailing behind it.
+
+Phase 13 is done.
 
 ### What the remaining phases are for
 
@@ -1436,9 +1482,10 @@ moving material sideways is a genuinely new primitive rather than a new call.
 [below](#phase-12--the-bending-vocabulary) as passes A–E: the transport primitive, sweep and
 draw, the ridge, the wall, and the gate that decides how much the ground is willing to give.
 
-**Phase 13 — the bender's body.** Pass A is done and is written up
-[below](#phase-13--the-benders-body): the character now takes a pose per bending verb. The
-gestures are arms only — the lean, the weight shift and the event verbs are what is left.
+**Phase 13 — the bender's body. Done**, and written up
+[below](#phase-13--the-benders-body) as passes A–C: a pose per held verb, a struck envelope
+for the two that are events, and a lean spent through the spine above the pelvis so the feet
+never learn about it.
 
 **Phase 14 — stakes.** A sandbox with no opposition. Weather that undoes the work, ground
 that collapses if undercut, a reason to build one thing rather than another. The substrate

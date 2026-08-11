@@ -57,6 +57,16 @@ export interface GesturePose {
     readonly shoulder: number;
     /** Elbow flexion carried on top of the shoulder. */
     readonly elbow: number;
+    /**
+     * Torso pitch, radians, positive forward. Spent through the spine above the pelvis.
+     *
+     * DELIBERATELY NOT A WHOLE-BODY LEAN. The gait plants its feet against the pelvis, so a
+     * lean that started at the ankles would move the hips and drag every planted foot with
+     * them — the one thing Phase 7 exists to prevent. Leaning from the waist up costs the
+     * feet nothing and buys almost all of the read, because what sells a body committing to
+     * something is the chest and the head, not the shins.
+     */
+    readonly lean: number;
 }
 
 const DEG = Math.PI / 180;
@@ -72,25 +82,25 @@ const DEG = Math.PI / 180;
  *
  * They are stated as a table rather than a switch so that adding the sixth costs a row.
  */
-const POSES: Record<keyof Commanding, { shoulder: number; elbow: number }> = {
+const POSES: Record<keyof Commanding, { shoulder: number; elbow: number; lean: number }> = {
     // Hands up under the rising ground, palms turned to it. Past vertical-forward, which is
     // what separates lifting from pointing.
-    raise: { shoulder: 118 * DEG, elbow: 42 * DEG },
+    raise: { shoulder: 118 * DEG, elbow: 42 * DEG, lean: -9 * DEG },
     // Pressing down: arms forward and low, elbows nearly straight, weight going into it.
-    lower: { shoulder: 52 * DEG, elbow: 14 * DEG },
+    lower: { shoulder: 52 * DEG, elbow: 14 * DEG, lean: 14 * DEG },
     // Carrying material away — arms extended along the bearing the shove is taking.
-    sweep: { shoulder: 84 * DEG, elbow: 26 * DEG },
+    sweep: { shoulder: 84 * DEG, elbow: 26 * DEG, lean: 16 * DEG },
     // Drawing it back: the same line, but folded in toward the chest.
-    draw: { shoulder: 58 * DEG, elbow: 95 * DEG },
+    draw: { shoulder: 58 * DEG, elbow: 95 * DEG, lean: -13 * DEG },
     // Riding your own pillar up. Arms down and slightly back, pushing against the ground
     // that is lifting you — the one pose where the hands do NOT lead.
-    pedestal: { shoulder: -24 * DEG, elbow: 12 * DEG },
+    pedestal: { shoulder: -24 * DEG, elbow: 12 * DEG, lean: 7 * DEG },
     // Driving a wave away from you: both arms punched out along the bearing, elbows nearly
     // locked. The follow-through of a shove rather than the carry of one.
-    ridge: { shoulder: 101 * DEG, elbow: 7 * DEG },
+    ridge: { shoulder: 101 * DEG, elbow: 7 * DEG, lean: 23 * DEG },
     // Throwing a barrier up: arms hurled overhead, which is the highest the hands go of
     // anything here — and has to be, because the wall is the tallest thing they make.
-    wall: { shoulder: 158 * DEG, elbow: 22 * DEG },
+    wall: { shoulder: 158 * DEG, elbow: 22 * DEG, lean: -17 * DEG },
 };
 
 /** Held poses, in priority order. The first one down wins if two are. */
@@ -120,6 +130,7 @@ export class Gesture implements GesturePose {
     weight = 0;
     shoulder = 0;
     elbow = 0;
+    lean = 0;
     /** Which pose is being blended toward, or null. Read by the overlay and the probe. */
     active: keyof Commanding | null = null;
 
@@ -127,6 +138,7 @@ export class Gesture implements GesturePose {
     /** Held between frames so a released gesture relaxes from where it was, not from rest. */
     private _shoulder = 0;
     private _elbow = 0;
+    private _lean = 0;
     /** The strike currently playing out, and how far into it. Null between blows. */
     private _strike: keyof Commanding | null = null;
     private _strikeT = 0;
@@ -198,8 +210,10 @@ export class Gesture implements GesturePose {
                 // would arrive late and soft.
                 this._shoulder = pose.shoulder;
                 this._elbow = pose.elbow;
+                this._lean = pose.lean;
                 this.shoulder = this._shoulder;
                 this.elbow = this._elbow;
+                this.lean = this._lean;
                 return;
             }
         }
@@ -213,8 +227,10 @@ export class Gesture implements GesturePose {
         if (target !== null) {
             this._shoulder += (target.shoulder - this._shoulder) * k;
             this._elbow += (target.elbow - this._elbow) * k;
+            this._lean += (target.lean - this._lean) * k;
         }
         this.shoulder = this._shoulder;
         this.elbow = this._elbow;
+        this.lean = this._lean;
     }
 }

@@ -51,6 +51,15 @@ await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 30000 });
 await page.waitForFunction(() => (window.__substrate ?? null) !== null, null, { timeout: 90000 });
 await page.waitForTimeout(2500);
 
+// THE VERBS ARE OFF FOR THE WHOLE OF THIS PROBE, and the first version was wrong not to be.
+// Holding C raises the ground the character is standing next to, which tilts it, which moves
+// the character — so "the ankle moved 240 mm" was measuring the player sliding down a hill
+// they had just built, not the lean reaching the leg solve. The body under test is the
+// gesture layer; the ground moving is a different system's correctness and it was drowning
+// this one. sys.gesture is independent of sys.verbs, so the poses still run.
+await page.evaluate(() => window.__substrate.settings.set("sys.verbs", false));
+await page.waitForTimeout(400);
+
 // THROUGH THE REAL KEYS, not by poking gesture.update(). The thing being tested includes the
 // keydown listener, the auto-repeat filter, the per-frame consumption in endFrame() and the
 // enable toggle — any one of which can be wrong while the pose itself is perfect. Same
@@ -64,7 +73,23 @@ const read = () =>
         // Bone indices are the palette order from character/skeleton.ts: handR 13, handL 16.
         const hy = (sk.head[13 * 3 + 1] + sk.head[16 * 3 + 1]) * 0.5;
         const hz = (sk.head[13 * 3 + 2] + sk.head[16 * 3 + 2]) * 0.5;
-        return { y: hy, z: hz, weight: a.gesture.weight, active: a.gesture.active };
+        // chest 2, head 4 for the torso. THE ANKLES ARE READ IN WORLD SPACE, out of the
+        // gait's own array — private at compile time, and this is a measurement harness
+        // reaching in on purpose. Character space is the wrong frame for this claim: the
+        // idle sway moves the PELVIS by a centimetre or so, and since character space is
+        // pinned to the body that reads as the feet sliding when it is the hips that moved.
+        // World space is also where Phase 7 states the guarantee — a planted foot does not
+        // move — so it is the frame the claim belongs in.
+        return {
+            y: hy,
+            z: hz,
+            chestZ: sk.head[2 * 3 + 2],
+            headZ: sk.head[4 * 3 + 2],
+            ankle: [a.gait._ankle[0], a.gait._ankle[2], a.gait._ankle[3], a.gait._ankle[5]],
+            lean: a.gesture.lean,
+            weight: a.gesture.weight,
+            active: a.gesture.active,
+        };
     });
 
 const settle = (ms) => page.waitForTimeout(ms);
@@ -72,13 +97,27 @@ const settle = (ms) => page.waitForTimeout(ms);
 await settle(600);
 const idle = await read();
 
+// THE BACKGROUND, MEASURED RATHER THAN ASSUMED. The character drifts a few millimetres a
+// second standing still — it is on a slope and gravity is doing what gravity does — so
+// "the ankle moved" is only evidence about the lean if it moved MORE than it was going to
+// anyway. An equal interval with no key held is what makes the tolerance below a
+// measurement instead of a guess.
+const driftOf = (a, b) => Math.max(Math.abs(a.ankle[0] - b.ankle[0]), Math.abs(a.ankle[1] - b.ankle[1]), Math.abs(a.ankle[2] - b.ankle[2]), Math.abs(a.ankle[3] - b.ankle[3]));
+const ctrlA = await read();
+await settle(700);
+const background = driftOf(await read(), ctrlA);
+
 const poses = {};
 for (const [name, key] of Object.entries(KEYS)) {
+    // Taken immediately before the press, so the comparison spans only the blend rather
+    // than every second since the probe started.
+    const before = await read();
     await page.keyboard.down(key);
     // Long enough for the blend to arrive: char.gestureBlend is a rate, so 600 ms at the
     // default 11/s is more than six time constants.
     await settle(700);
     poses[name] = await read();
+    poses[name].footDrift = driftOf(poses[name], before);
     await page.keyboard.up(key);
     // And long enough to come back, which is the half nobody checks.
     await settle(700);
@@ -167,6 +206,51 @@ for (const [name, p] of Object.entries(poses)) {
         bad++;
     }
 }
+
+// -- the lean, and the thing it must not do ----------------------------------------------
+//
+// Pass C leans the torso into what is being commanded. The claim that matters is not that
+// the chest moved — it is that the chest moved AND THE FEET DID NOT.
+//
+// A lean is the obvious thing to build from the ankles, and that is exactly what would break
+// this project's oldest guarantee: the gait plants feet in WORLD space and the whole of
+// Phase 7 rests on a planted foot not moving. Pitching the pelvis drags every planted foot
+// with it, and the failure is a slow slide that no still frame shows. So the lean is spent
+// through the spine above the pelvis, and this measures both halves of that sentence.
+console.log("");
+console.log("the lean — torso pitch, and what it costs the feet");
+console.log(`  idle          chest z ${f(idle.chestZ)}   head z ${f(idle.headZ)}`);
+for (const [name, p] of Object.entries(poses)) {
+    console.log(`  ${name.padEnd(9)}     lean ${((p.lean * 180) / Math.PI).toFixed(1).padStart(6)} deg   chest z ${f(p.chestZ)}   head z ${f(p.headZ)}   feet ${(p.footDrift * 1000).toFixed(2)} mm`);
+}
+console.log(`  the same interval with NO key held moves the feet ${(background * 1000).toFixed(2)} mm — that is the floor`);
+console.log("");
+
+// Forward for the poses that push, back for the ones that haul. These are the same signs the
+// pose table states, measured at the chest rather than asserted at the source.
+claim(poses.lower.chestZ > idle.chestZ + 0.02, `lowering puts the chest over the hands (${f(poses.lower.chestZ)} vs ${f(idle.chestZ)})`);
+claim(poses.sweep.chestZ > idle.chestZ + 0.02, `sweeping leans in behind the push (${f(poses.sweep.chestZ)})`);
+claim(poses.draw.chestZ < idle.chestZ - 0.01, `drawing takes the weight back with it (${f(poses.draw.chestZ)})`);
+claim(poses.raise.chestZ < idle.chestZ, `raising counterweights away from the lift (${f(poses.raise.chestZ)})`);
+// Spent THROUGH the spine: the head ends up leaning less than the chest, which is what keeps
+// the camera's subject from tipping over.
+claim(
+    Math.abs(poses.sweep.headZ - idle.headZ) < Math.abs(poses.sweep.chestZ - idle.chestZ) * 2.2,
+    `the lean is spent through the spine rather than tipping the whole figure`,
+);
+// THE ONE THAT MATTERS. Sub-millimetre is not a tolerance, it is a statement that leanZ is
+// read by nothing in the leg solve.
+// A lean that reached the leg solve would pitch the pelvis and drag the planted feet with
+// it — centimetres, not the millimetre the character wanders anyway. Twice the measured
+// background is a generous bar and still an order of magnitude below that failure.
+const bar = Math.max(background * 2, 0.004);
+for (const [name, p] of Object.entries(poses)) {
+    if (p.footDrift > bar) {
+        console.log(`  FAIL  ${name} moved a foot by ${(p.footDrift * 1000).toFixed(2)} mm against a ${(bar * 1000).toFixed(2)} mm bar — the lean has reached the leg solve`);
+        bad++;
+    }
+}
+claim(true, `every pose moves the feet no more than standing still does (bar ${(bar * 1000).toFixed(2)} mm)`);
 
 console.log("");
 console.log("struck gestures — one press, sampled every 40 ms; the key is up the whole time");
