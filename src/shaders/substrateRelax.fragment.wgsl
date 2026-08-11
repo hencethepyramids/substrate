@@ -100,7 +100,33 @@ const SR_PACK_GAIN: f32 = 6.0;
 const SR_PACK_PERSIST: f32 = 4.0;
 
 /// Nothing this system does is allowed to move the ground by more than this.
-const SR_MAX_OFFSET: f32 = 2.0;
+///
+/// RAISED FROM 2.0 IN PHASE 14, because it had quietly become the thing that limited
+/// building. Snow's critical height under load is cohesion * SP_CRIT_PER_COHESION = 2.13 m,
+/// and the old ceiling sat at 2.0 — so a column simply stopped growing at the clamp and the
+/// collapse rule could never once fire. The probe caught it as six columns all standing at
+/// exactly 2.000 m, which is what a clamp looks like and nothing else does.
+///
+/// The point of pass B is that what you can build is decided by the MATERIAL. That is only
+/// true if the arbitrary constant is out of the way, so this is now well clear of every
+/// element's critical height and is back to being what it was meant to be: a sanity bound
+/// that nothing legitimate reaches.
+const SR_MAX_OFFSET: f32 = 4.0;
+
+/// How fast material that has failed under its own weight turns loose, per second per metre
+/// of pile standing on it.
+///
+/// THE PIECE THAT MAKES A COLLAPSE HAPPEN AT ALL. srSlumpFlow moves loose mass and nothing
+/// else — `min(q, src.y * SR_MAX_SHARE)` — which is deliberate and is what stops the whole
+/// landscape draining downhill on frame one. But a column raised by a stamp is not loose:
+/// the raise puts almost nothing into the mass channel in cohesive ground. So a face that
+/// had lost every bit of its cohesion still stood there, because the repose angle said it
+/// should fall and there was nothing present to fall. Six columns keeping 97% of their
+/// height with a critical height less than half of them is what that looks like.
+///
+/// Failing material MOBILISES. This does not create anything — depression is untouched, and
+/// the mass channel is a statement about what is free to move, not about how much there is.
+const SR_FAIL_RATE: f32 = 2.5;
 
 /// Loose mass at which material is fully mobile — a shove carries it as fast as it is asked
 /// to. The same 5 cm scale as SR_BERM_REF above, and for the same reason: five centimetres
@@ -359,7 +385,11 @@ fn srSlumpFlow(me: vec4f, other: vec4f, rise: f32, dist: f32, dt: f32, rate: f32
 
     // The slope the SOURCE holds, not the destination's: material at the top of a
     // slope is what decides whether the slope stands up.
-    let excess = max(abs(rise) - spTanRepose(src.z, src.w) * dist, 0.0);
+    // THE LOAD IS THE SOURCE'S OWN PILE. Depression is negative where material stands proud,
+    // so -src.x is how much is stacked here — and it is the SOURCE's, not this texel's,
+    // because the slope that fails is the one the material at the top of it is standing on.
+    // Below the critical height this is the same expression it has always been.
+    let excess = max(abs(rise) - spTanRepose(src.z, src.w, max(-src.x, 0.0)) * dist, 0.0);
 
     // A heaped lip is unsupported on one side; a pit floor is buttressed on three.
     // slumpAnisotropy is that ratio, and it is why snow's berms round off while its
@@ -452,6 +482,15 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let owed = srOwedAt(c);
     s.x = s.x - owed;
     s.y = s.y + owed;
+
+    // COLLAPSE. Where the pile standing here is past what its own cohesion can carry, the
+    // difference between the cohesion it has and the cohesion it is still holding with is
+    // the fraction that has failed — and failed material becomes loose, which is the one
+    // thing the slump above needs in order to be able to take it away. Capped at the pile
+    // itself, because material cannot be more mobile than it is present.
+    let proud = max(-s.x, 0.0);
+    let failing = max(spCohesionAt(s.z, s.w) - spCohesionUnder(s.z, s.w, proud), 0.0);
+    s.y = min(s.y + failing * proud * SR_FAIL_RATE * dt, proud);
 
     // Isotropic creep. Cohesion resists it exactly as it resists slump, so one number
     // per element governs both rather than two that can be tuned into disagreement.

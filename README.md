@@ -1523,6 +1523,50 @@ No shot is committed for this pass. The obvious one — a storm blowing — phot
 rather than as *loss*, and the honest picture is a before-and-after of a specific pile, which
 is a capture harness change rather than a camera angle. The numbers above are the evidence.
 
+### Pass B: cohesion gets a budget
+
+Cohesion made material **infinitely strong**. `spCohesionAt` carries the repose angle toward
+vertical and says nothing about how much is stacked on top, so a snow face held at 78° whether
+it was one metre tall or thirty. A player could raise a tower to the buffer's ceiling and it
+stood there. It was the last thing here that could be done and never be told no.
+
+Real cohesive ground has a critical height for a vertical cut — soil mechanics puts it near
+`4c/γ`, proportional to how well the stuff sticks together. So cohesion now falls off above
+`cohesion × 2.6` metres of standing pile and is gone half again above that. Snow's 0.82 buys
+about 2.1 m of face; sand's 0.02 buys five centimetres, which is why sand never needed this
+rule and snow always did.
+
+**Full strength below the critical height, deliberately.** Every result this project measured
+before the rule existed was measured on material below one, and all of it had to be untouched.
+It is: the ridge and wall crests read 0.5691 / 0.6692 / 1.4439 / 1.6015 m after the change,
+identical to the digits they read before it.
+
+| column raised | stood after 4 s | kept |
+| --- | --- | --- |
+| 0.50 m | 0.484 | 97% |
+| 1.60 m | 1.549 | 97% |
+| 2.40 m | 2.323 | 97% |
+| 3.20 m | 2.842 | 89% |
+| 3.98 m | 2.952 | **74%** |
+
+Both tall columns settle to about 2.9 m however much was stacked, which is what a critical
+height looks like from the outside.
+
+Two things had to be fixed before any of that could happen, and neither was the rule:
+
+- **The ceiling sat below the physics.** `SR_MAX_OFFSET` clamped the buffer at 2.0 m and
+  snow's critical height is 2.13 m, so the collapse could never once fire. The probe caught it
+  as six columns standing at *exactly* 2.000 m — which is what a clamp looks like and nothing
+  else does. It is 4.0 m now: the point of the pass is that the material decides what can be
+  built, and that is only true with the arbitrary constant out of the way.
+- **Slump only moves loose mass**, which is deliberate and is what stops the landscape draining
+  downhill on frame one — but a raised column is not loose. A face that had lost every bit of
+  its cohesion still stood, because the repose angle said it should fall and there was nothing
+  present to fall. Failing material now **mobilises**: the gap between the cohesion it has and
+  the cohesion it is still holding with becomes loose mass, capped at the pile itself. Nothing
+  is created — depression is untouched, and the mass channel is a statement about what is free
+  to move, not about how much there is.
+
 ### What the remaining phases are for
 
 Phases 0 to 9 built a world; 10 and 11 gave someone a way to act in it and a reason to. What
@@ -1546,9 +1590,9 @@ draw, the ridge, the wall, and the gate that decides how much the ground is will
 for the two that are events, and a lean spent through the spine above the pelvis so the feet
 never learn about it.
 
-**Phase 14 — stakes.** Pass A is done and is written up
-[below](#phase-14--stakes): weather, and a goal layer that scores what survived. Ground that
-collapses if undercut is what is left.
+**Phase 14 — stakes. Done**, and written up [below](#phase-14--stakes) as passes A and B:
+weather with a real calm in it, and cohesion given a budget so a pile can be built past what
+it can carry.
 
 ---
 
