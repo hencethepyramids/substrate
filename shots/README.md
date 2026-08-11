@@ -117,3 +117,15 @@ Every animation defect this project has had was invisible in a single still.
   the material a ridge stands on comes from beside it in sand (cohesion 0.02) and from
   compaction in snow (0.82). `scripts/probeRidge.mjs` measures the flanks at 46.6% of the
   crest in desert against 7.4% in snow; this pair is that measurement with the lights on.
+
+- `phase12-wall-snow.png` / `phase12-wall-desert.png` — sun 18, yaw 200, pitch 12, the same
+  `--wall` press in two elements, photographed 2.5 seconds AFTER it goes up. That delay is
+  the subject: both walls are thrown to 1.3 m, and by the time the shutter opens snow is
+  still standing at 1.326 m while sand has slumped to 0.316 m.
+
+  Snow hides the character to the shoulders; sand is a low bank they stand clear above.
+  Cohesion holds a face that steep and a 34-degree repose does not, and no line in the game
+  layer knows which one it is talking to.
+
+  The scalloping along the snow crest is real and is the seventeen stamps that built it, 0.4
+  radii apart.

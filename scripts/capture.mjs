@@ -402,6 +402,30 @@ if (argv.has("ridge")) {
     );
 }
 
+// THROW UP A WALL. Like the ridge this is a press and a wait, but what the wait is FOR is
+// different: a ridge is finished once it has been laid, and a wall's interesting moment is
+// afterwards. Whether a 1.3 m barrier over a 0.7 m radius stands or slumps back toward the
+// angle of repose is the element's business, so `--wall=<ms>` is really a settling time.
+if (argv.has("wall")) {
+    await page.keyboard.press("n");
+    await page.waitForTimeout(Number(argv.get("wall")) || 1800);
+    const v = await page.evaluate(() => {
+        const a = window.__substrate;
+        const t = a.verbs.target;
+        const len = a.settings.get("play.wallLength");
+        const f = a.mover.facing;
+        // Sample the crest at the centre and at both ends, through the same CPU mirror the
+        // character stands on, so the console says whether it is still standing.
+        const across = { x: Math.cos(f), z: -Math.sin(f) };
+        const h = (d) => a.gait.groundAt(t.x + across.x * d, t.z + across.z * d);
+        return { n: a.verbs.walls, live: a.verbs.liveRidges, dropped: a.substrate.dropped, len, mid: h(0), end: h(len * 0.4), off: h(len * 0.9) };
+    });
+    console.log(
+        `verbs: ${v.n} wall(s), ${v.live} lines running, ${v.len} m span — crest stands ${(v.mid - v.off).toFixed(3)} m at the middle ` +
+            `and ${(v.end - v.off).toFixed(3)} m at ${(v.len * 0.4).toFixed(1)} m out, stamps dropped ${v.dropped}`,
+    );
+}
+
 // GATHER, THROW, LAND. Two claims, and neither has a tuning constant in it: the volume
 // that left the hands has to be the volume that reaches the ground, and the heap has to
 // come down on the bearing it was thrown along. A projectile that loses its load, or one

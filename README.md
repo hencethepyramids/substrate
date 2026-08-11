@@ -1005,6 +1005,7 @@ negative depth it raises instead of pressing.
 | `V` | lower it |
 | `G` | pedestal — raise the ground under your own feet and ride it up |
 | `B` | ridge — press once and a wave runs `play.ridgeRange` metres away from you, laying a crest as it goes |
+| `N` | wall — throw a barrier up across your facing. Whether it stays up is the element's business |
 
 `Z` and `X` are Phase 12 and are a step beyond the three below them: raise, lower and
 pedestal act on one *spot*, and these two have a *bearing*. See
@@ -1185,6 +1186,62 @@ directly over the stamps' actual positions agrees with the closed form to 0.05% 
 scales with `(1 - cohesion)`, which makes it a rim effect. Small, bounded, measured on every
 run, and not yet explained.
 
+### Pass D: the wall, which is two ridges
+
+`N` throws a barrier up across your facing, and **it is the ridge with different arguments.**
+Pass C kept each travelling line's speed, range, radius and depth in the loop that stepped
+it; moving those onto the record itself is the whole of pass D. A wall is then two lines
+launched back to back along the perpendicular — shorter, faster, thinner, taller. The
+roadmap listed the ridge and the wall as separate moves, and they are separate moves; only
+one of them needed building.
+
+Parameters on the record buy something else worth having: a line already in flight keeps the
+numbers it was launched with, so dragging a slider mid-wave cannot bend a ridge into a wall.
+
+**It unzips from the middle, and the queue is why.** A wall wants to appear at once and
+cannot — the substrate lands one stamp per relaxation step, so an eighteen-stamp wall issued
+in a single frame would sit in the queue for eighteen frames and overflow the sixteen slots
+it has. Growing outward from the centre spreads the same stamps over the frames the queue
+was always going to take, so the constraint costs nothing and buys a wall that visibly
+throws itself up rather than one that pops. The second line starts one spacing out so the
+two halves do not both stamp the centre; the probe checks that seam against its own
+immediate neighbours rather than against the crest average, because a double stamp is a
+spike one stamp wide and the finite-length taper varies over metres.
+
+Measured, both elements, 17 stamps at 0.28 m and zero dropped:
+
+| | desert | snow |
+| --- | --- | --- |
+| spans across the facing | 4.81 m | 5.00 m (asked 5 m) |
+| spans along it | 0.63 m | 0.81 m |
+| seam above its neighbours | 4.5% | −0.1% |
+
+Long across, short along is the one thing only this verb can get wrong. A perpendicular
+taken backwards or swapped for the facing gives a wall that is still the right length, still
+the right height, and lying the wrong way — and every other check here would pass it.
+
+**Whether it stays up is the element's business.** Two and a half seconds after it goes up, a
+1.3 m wall over a 0.7 m radius stands at **1.326 m in snow** and has slumped to **0.316 m in
+sand**. Nothing in the game layer knows: snow's cohesion holds a face that steep, and sand's
+34° repose does not. [phase12-wall-snow.png](shots/phase12-wall-snow.png) hides the character
+to the shoulders; [phase12-wall-desert.png](shots/phase12-wall-desert.png) is a low bank they
+stand clear above.
+
+**The residual from pass C, now characterised.** Running the same wall at two amplitudes
+answers the question the ridge left open. Desert overshoots the line-integral model by
+**10.5% at 1.3 m and 8.9% at 0.3 m** — 4.3× the amplitude for essentially the same fraction,
+so it is not a clamp, a saturation or any other nonlinearity. It is a fixed proportion that
+scales with `(1 − cohesion)` (snow: 1.7% and 0.7%) and grows as the radius shrinks (the
+ridge's 0.9 m radius gives 2.9%, this 0.7 m one gives ~10%). So the buffer delivers slightly
+less rim than a continuous line integral predicts. Direct summation over the actual stamp
+positions agrees with the closed form to 0.05%, so the model is not the approximation at
+fault. Still not explained; now bounded, reproducible and measured on every run rather than
+tuned away.
+
+Also honest: the crest is visibly scalloped in the snow shot. That is the seventeen stamps,
+at 0.4 radii apart. Tightening the spacing smooths it and costs queue slots, and which way
+that trade should go is a question for whatever ends up standing behind the wall.
+
 ### What the remaining phases are for
 
 Phases 0 to 9 built a world; 10 and 11 gave someone a way to act in it and a reason to. What
@@ -1199,11 +1256,11 @@ cheap — a moving stamp over time. The rest need something the substrate does n
 is DIRECTIONAL TRANSPORT: every operation so far is radially symmetric about a point, and
 moving material sideways is a genuinely new primitive rather than a new call.
 
-Passes A, B and C are done and are written up
-[below](#phase-12--the-bending-vocabulary): the primitive, the two verbs that carry material
-along a bearing, and the ridge. Of the four moves named above, only **a wall thrown up along
-a line** is left — plus the loose-material question, which is the more interesting of the
-two.
+**All four of those moves now exist**, written up
+[below](#phase-12--the-bending-vocabulary) as passes A–D: the transport primitive, sweep and
+draw, the ridge, and the wall. What is left in this phase is not a move but a question — the
+sweep carries bare ground as willingly as a drift, and gating it on the loose-mass channel
+needs a decision the CPU cannot make.
 
 **Phase 13 — the bender's body.** Right now the earth moves and the character stands there.
 The gait solver from Phase 7 poses for walking, sprinting and sliding; it has nothing to say

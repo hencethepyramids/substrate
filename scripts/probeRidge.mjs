@@ -85,6 +85,12 @@ const result = await page.evaluate(async () => {
     const reach = app.settings.get("play.reach");
     const idle = { ignite: false, gather: false, place: false, pack: false, raise: false, lower: false, pedestal: false, throwIt: false, sweep: false, draw: false, ridge: false };
 
+    // READ ONCE, BEFORE ANY RUN MUTATES IT. The amplitude sweep below sets this setting, so
+    // reading it inside the biome loop measures whatever the previous biome left behind —
+    // which is exactly what it did the first time, and reported snow twice at 0.3 m while
+    // claiming one of them was 1.3 m.
+    const wallHeightAsked = app.settings.get("play.wallHeight");
+
     const runs = [];
     for (const biome of ["desert", "snow"]) {
         app.settings.set("world.biome", biome);
@@ -217,9 +223,109 @@ const result = await page.evaluate(async () => {
             if (-at(start.x + fwd.x * d, start.z + fwd.z * d, flip) > crest * 0.34) reached = d;
         }
 
+        // -- the wall ---------------------------------------------------------------
+        //
+        // Same machinery, different arguments — so the only thing genuinely new to test is
+        // the one thing arguments can get wrong: a wall has to lie ACROSS the facing. Get
+        // the perpendicular backwards and it is still a wall, still the right length, still
+        // the right height, and it runs the wrong way. So the extent is measured along BOTH
+        // axes and compared: long across, short along, or the verb is pointing the wrong way.
+        const wLen = app.settings.get("play.wallLength");
+        const wRad = app.settings.get("play.wallRadius");
+        const wSpeed = app.settings.get("play.wallSpeed");
+        const wallCases = [];
+        // TWO AMPLITUDES, BECAUSE THE RESIDUAL NEEDS CHARACTERISING RATHER THAN NOTING. The
+        // ridge already leaves the crest a few percent above what the kernel's line integral
+        // predicts, scaling with (1 - cohesion). If that residual is a fixed FRACTION it will
+        // read the same at both heights and it is a modelling error; if it grows with the
+        // amplitude it is a nonlinearity in the buffer and a different thing entirely. One
+        // extra run answers a question that no amount of staring at the shader has.
+        for (const wHeight of [wallHeightAsked, 0.3]) {
+            app.settings.set("play.wallHeight", wHeight);
+            app.substrate.reset();
+            await wait();
+            const wallBefore = app.substrate.dropped;
+            // Metres of crest laid, which is stamps * spacing — the decisive check on
+            // whether the two halves lay the grid they claim to rather than doubling up.
+            const laidBefore = app.verbs.ridgeLength;
+        const wSpacing = wRad * 0.4;
+        // Two lines stamp at once, so half a spacing's worth of dt per call keeps the
+        // substrate queue — which drains one stamp per step — from ever backing up.
+        const wdt = wSpacing / (2 * wSpeed);
+        app.verbs.update({ ...idle, wall: true }, actor, wdt);
+        for (let i = 0; i < Math.ceil(wLen / wSpacing) * 2 + 12; i++) {
+            await wait();
+            app.verbs.update(idle, actor, wdt);
+        }
+        for (let i = 0; i < 6; i++) await wait();
+
+        const wallData = await front(app.substrate).readPixels(0, 0, null, true, false, 0, 0, size, size);
+        const wallAt = (wx, wz) => {
+            const col = Math.floor((wx - origin.x) / texel);
+            let row = Math.floor((wz - origin.y) / texel);
+            if (row < 0 || row >= size || col < 0 || col >= size) return 0;
+            if (flip) row = size - 1 - row;
+            return -wallData[(row * size + col) * 4];
+        };
+        // The wall is centred on the same target the ridge started from, and lies along the
+        // perpendicular: forward is (sin, cos), so across is (cos, -sin).
+        const across = { x: Math.cos(facing), z: -Math.sin(facing) };
+        const wallProfile = [];
+        for (let a = -wLen * 0.8; a <= wLen * 0.8; a += texel) {
+            wallProfile.push({ a, h: wallAt(start.x + across.x * a, start.z + across.z * a) });
+        }
+        // A NARROW WINDOW, unlike the ridge's. A 5 m wall is only 3.6 radii to each end, so
+        // the line integral's "a neighbour on both sides" assumption is already failing a
+        // metre out and a wide average measures the taper rather than the crest.
+        let wallCrest = 0;
+        let nCrest = 0;
+        for (const p of wallProfile) {
+            if (Math.abs(p.a) < wLen * 0.12) {
+                wallCrest += p.h;
+                nCrest++;
+            }
+        }
+        wallCrest /= Math.max(nCrest, 1);
+        // Span along each axis, taken where the crest is still a third of its own height.
+        const spanOn = (dir) => {
+            let lo = 0;
+            let hi = 0;
+            for (let a = -wLen; a <= wLen; a += texel) {
+                if (wallAt(start.x + dir.x * a, start.z + dir.z * a) > wallCrest * 0.34) {
+                    lo = Math.min(lo, a);
+                    hi = Math.max(hi, a);
+                }
+            }
+            return hi - lo;
+        };
+        const spanAcross = spanOn(across);
+        const spanAlong = spanOn(fwd);
+        // A wall built as two halves has one seam, in the middle. COMPARED LOCALLY, against
+        // its own immediate neighbours one spacing out, rather than against the crest
+        // average — a double-stamped centre is a spike a single stamp wide, and the finite
+        // length taper that would confuse a global comparison varies over metres.
+        const near = (a) => wallAt(start.x + across.x * a, start.z + across.z * a);
+        const seam = near(0) / Math.max((near(wSpacing) + near(-wSpacing)) * 0.5, 1e-6);
+
+            wallCases.push({
+                crest: wallCrest,
+                height: wHeight,
+                spanAcross,
+                spanAlong,
+                length: wLen,
+                seam,
+                stamps: Math.round((app.verbs.ridgeLength - laidBefore) / wSpacing),
+                spacing: wSpacing,
+                walls: app.verbs.walls,
+                live: app.verbs.liveRidges,
+                dropped: app.substrate.dropped - wallBefore,
+            });
+        }
+
         runs.push({
             biome,
             cohesion,
+            walls: wallCases,
             oneStamp,
             controlDepth: -CONTROL_DEPTH,
             idleDrift: afterIdle - oneStamp,
@@ -343,6 +449,49 @@ for (const r of result.runs) {
             console.log(`  -> snow barely trenches: cohesion 0.82 keeps 18% of the rim, so the crest`);
             console.log(`     came out of compaction rather than out of the ground beside it`);
         }
+    }
+    for (const w of r.walls) {
+        const wWant = w.height * crestFactor(r.cohesion);
+        const over = (w.crest - wWant) / wWant;
+        console.log(`  WALL ${w.height.toFixed(2)} m   crest ${w.crest.toFixed(4)} m; model says ${wWant.toFixed(4)} m — ${(over * 100).toFixed(2)}% over`);
+        console.log(`             spans ${w.spanAcross.toFixed(2)} m ACROSS the facing (asked ${w.length} m), ${w.spanAlong.toFixed(2)} m along it`);
+        console.log(`             ${w.stamps} stamps at ${w.spacing.toFixed(3)} m; seam sits ${((w.seam - 1) * 100).toFixed(1)}% above its own neighbours`);
+        console.log(`             ${w.live} lines still running, ${w.dropped} stamps dropped`);
+
+        // THE ONE THING ONLY THE WALL CAN GET WRONG. Long across, short along — a
+        // perpendicular taken backwards or swapped for the facing would sail through every
+        // other check here.
+        if (w.spanAcross < w.length * 0.8 || w.spanAcross > w.length * 1.25) {
+            console.log(`  FAIL: spans ${w.spanAcross.toFixed(2)} m across against a ${w.length} m wall`);
+            bad++;
+        }
+        if (w.spanAlong > w.length * 0.35) {
+            console.log(`  FAIL: ${w.spanAlong.toFixed(2)} m deep along the facing — it is not lying across it`);
+            bad++;
+        }
+        // A double-stamped centre would stand a clear half again above the stamps either
+        // side of it. Anything smaller is the crest's own curvature.
+        if (w.seam > 1.2) {
+            console.log(`  FAIL: both halves are stamping the centre — that is a lump, not a seam`);
+            bad++;
+        }
+        if (w.dropped !== 0 || w.live !== 0) {
+            console.log(`  FAIL: ${w.dropped} stamps dropped, ${w.live} lines left running`);
+            bad++;
+        }
+        if (Math.round(w.stamps) < Math.round(w.length / w.spacing) - 2) {
+            console.log(`  FAIL: only ${w.stamps} stamps for a ${w.length} m wall`);
+            bad++;
+        }
+    }
+    // THE RESIDUAL, CHARACTERISED RATHER THAN ASSERTED. Both walls run the same geometry at
+    // different amplitudes, so the ratio of their overshoots says what kind of thing it is.
+    if (r.walls.length === 2) {
+        const o1 = r.walls[0].crest / (r.walls[0].height * crestFactor(r.cohesion)) - 1;
+        const o2 = r.walls[1].crest / (r.walls[1].height * crestFactor(r.cohesion)) - 1;
+        const amp = r.walls[0].height / r.walls[1].height;
+        console.log(`  -> overshoot ${(o1 * 100).toFixed(1)}% at ${r.walls[0].height} m against ${(o2 * 100).toFixed(1)}% at ${r.walls[1].height} m`);
+        console.log(`     (${amp.toFixed(1)}x the amplitude; a fixed fraction would read the same at both)`);
     }
     console.log("");
 }

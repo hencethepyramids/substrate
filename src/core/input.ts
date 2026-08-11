@@ -75,6 +75,8 @@ export class Input {
      * a longer one.
      */
     ridge = false;
+    /** Pressed this frame - throw a wall up across your facing. An event, like the ridge. */
+    wall = false;
     /** Pressed this frame - throw what is carried. An event, like ignite. */
     throwIt = false;
     /** Pressed this frame - leave the ground. */
@@ -100,6 +102,7 @@ export class Input {
             if (ev.code === "KeyE" && !ev.repeat) this.ignite = true;
             if (ev.code === "KeyT" && !ev.repeat) this.throwIt = true;
             if (ev.code === "KeyB" && !ev.repeat) this.ridge = true;
+            if (ev.code === "KeyN" && !ev.repeat) this.wall = true;
             if (ev.code === "Space" && !ev.repeat) this.jump = true;
         });
         this._listen(window, "keyup", (e) => this._down.delete((e as KeyboardEvent).code));
@@ -210,6 +213,7 @@ export class Input {
         this.throwIt = false;
         this.jump = false;
         this.ridge = false;
+        this.wall = false;
     }
 
     dispose(): void {
