@@ -66,6 +66,15 @@ export class Input {
      */
     sweep = false;
     draw = false;
+    /**
+     * Pressed this frame - send a ridge running away from you. An event, like throw.
+     *
+     * The only bending input that is not a rate, and the reason is that it is not a rate:
+     * the other five command ground for as long as they are held, and this one launches
+     * something that then travels on its own. Holding it would stack waves rather than make
+     * a longer one.
+     */
+    ridge = false;
     /** Pressed this frame - throw what is carried. An event, like ignite. */
     throwIt = false;
     /** Pressed this frame - leave the ground. */
@@ -90,6 +99,7 @@ export class Input {
             this._down.add(ev.code);
             if (ev.code === "KeyE" && !ev.repeat) this.ignite = true;
             if (ev.code === "KeyT" && !ev.repeat) this.throwIt = true;
+            if (ev.code === "KeyB" && !ev.repeat) this.ridge = true;
             if (ev.code === "Space" && !ev.repeat) this.jump = true;
         });
         this._listen(window, "keyup", (e) => this._down.delete((e as KeyboardEvent).code));
@@ -199,6 +209,7 @@ export class Input {
         this.ignite = false;
         this.throwIt = false;
         this.jump = false;
+        this.ridge = false;
     }
 
     dispose(): void {

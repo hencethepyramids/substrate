@@ -66,6 +66,39 @@ const MAX_THROWN = 8;
 /** Release height above the character's feet, in metres - roughly the shoulder. */
 const THROW_HEIGHT = 1.35;
 
+/** Ridges travelling at once. More than this and the substrate queue is the real limit. */
+const MAX_RIDGES = 4;
+
+/**
+ * How far a ridge travels between stamps, as a fraction of its radius.
+ *
+ * A FRACTION OF THE RADIUS RATHER THAN A DISTANCE, and it earns its keep twice. It keeps
+ * consecutive stamps overlapping by the same amount at every radius, so widening a ridge
+ * does not also change how continuous it is — and because the crest a line of overlapping
+ * bowls builds up scales as radius/spacing, holding that ratio fixed makes the per-stamp
+ * depth a constant fraction of the crest height rather than something that has to be
+ * re-solved whenever the radius moves. See RIDGE_STAMP_DEPTH.
+ */
+const RIDGE_SPACING = 0.4;
+
+/**
+ * Per-stamp depth needed for one metre of crest, given the spacing above.
+ *
+ * SOLVED, NOT DIALLED, exactly as scoop's amplitude is. A ridge is a line of overlapping
+ * volume-neutral bowls, so the crest is the kernel's LINE INTEGRAL divided by the spacing:
+ * integrating (1 - u^2)e^(-u^2) along the line gives r*sqrt(pi)*e^(-a^2)*(1/2 - a^2) at a
+ * perpendicular distance a*r, so on the line itself each metre of travel contributes
+ * r*sqrt(pi)/2 and the crest stands at depth * r*sqrt(pi) / (2 * spacing). With the spacing
+ * pinned to 0.4r the radius cancels and what is left is a pure number.
+ *
+ * The same expression says what the FLANKS do, which is the part worth predicting: the
+ * profile goes negative past a = 1/sqrt(2) and bottoms out at a = sqrt(3/2), so a ridge
+ * should sit between two troughs 1.22 radii out, 44.6% as deep as it is tall. That is where
+ * the material came from — in ground that lets it come from there. Snow packs instead, and
+ * this is the same split the pedestal found in Phase 10 pass H.
+ */
+const RIDGE_STAMP_DEPTH = (2 * RIDGE_SPACING) / Math.sqrt(Math.PI);
+
 export class Verbs {
     /** Where the next verb will land. Read by the harness; a reticle would draw here. */
     readonly target = { x: 0, z: 0 };
@@ -96,6 +129,9 @@ export class Verbs {
     bent = 0;
     /** Cubic metres carried sideways. Neither gained nor lost — see `shove`. */
     swept = 0;
+    /** Ridges launched, and metres of crest laid down by them. For a probe. */
+    ridges = 0;
+    ridgeLength = 0;
     /** Thrown and landed volume, which must end equal. See _step below. */
     thrown = 0;
     landed = 0;
@@ -115,6 +151,18 @@ export class Verbs {
      */
     private readonly _flight = new Float32Array(MAX_THROWN * 7);
     private _inFlight = 0;
+    /**
+     * Ridges travelling: x, z, dx, dz, travelled, stamped - six floats each, allocated once.
+     *
+     * `stamped` is how far along the ridge the last stamp went down, and keeping it as a
+     * DISTANCE rather than a countdown is what makes the shape frame-rate independent. A
+     * wave that stamped once per frame would lay a bead every speed*dt metres, so the same
+     * ridge would be a smooth bank at 120 fps and a row of lumps at 20. Stamping every
+     * fixed fraction of a radius TRAVELLED instead means the frame rate changes how many
+     * stamps happen per frame and changes nothing about where they land.
+     */
+    private readonly _ridges = new Float32Array(MAX_RIDGES * 6);
+    private _live = 0;
 
     /**
      * Called whenever material reaches the ground, from a hand or from a landing throw.
@@ -291,6 +339,32 @@ export class Verbs {
             this.swept += sweepVolume;
         }
 
+        // THE RIDGE — the one bending verb that is not a rate.
+        //
+        // Sweep, draw, raise and lower all command ground for as long as they are held, and
+        // stop the moment they are let go. This launches something that then travels on its
+        // own, which makes it the first verb whose result outlives the input: press once and
+        // a wave runs ten metres away from you, laying a bank as it goes.
+        //
+        // NOTHING NEW IN THE SUBSTRATE, and that is the point of doing it after pass A
+        // rather than before. A ridge is a line of the same volume-neutral bowls that raise
+        // has been stamping since Phase 10 — the roadmap called this the cheap one, and it
+        // is cheap precisely because "a shape" here means "the same operation, walked".
+        // Where sweep needed a genuinely new kernel, this needs only somewhere to keep the
+        // wave's position between frames.
+        if (input.ridge && this._live < MAX_RIDGES) {
+            const o = this._live * 6;
+            this._ridges[o] = this.target.x;
+            this._ridges[o + 1] = this.target.z;
+            this._ridges[o + 2] = Math.sin(actor.facing);
+            this._ridges[o + 3] = Math.cos(actor.facing);
+            this._ridges[o + 4] = 0;
+            this._ridges[o + 5] = 0;
+            this._live++;
+            this.ridges++;
+        }
+        this._advanceRidges(dt);
+
         // THE PEDESTAL: raise the ground under your own feet and ride it up.
         //
         // This is the move the whole idea was for, and it is assembled entirely out of
@@ -342,6 +416,68 @@ export class Verbs {
                 this.placed += give;
                 this.onDeposit?.(this.target.x, this.target.z, give);
             }
+        }
+    }
+
+    /** Ridges still travelling. Read by the overlay and by the probe. */
+    get liveRidges(): number {
+        return this._live;
+    }
+
+    /**
+     * Walk every travelling ridge forward and lay down whatever crest it has earned.
+     *
+     * THE STAMPS ARE SPACED IN METRES, NOT IN FRAMES, which is the only interesting decision
+     * in here. Laying one per frame would make the ridge's shape a property of the machine
+     * it ran on — a smooth bank at 120 fps and a row of separate lumps at 20 — so the loop
+     * asks how far the wave has travelled since the last stamp and lays as many as fit. The
+     * frame rate then changes how many stamps happen per frame and changes nothing about
+     * where any of them land.
+     *
+     * It also keeps the substrate queue honest. One stamp lands per relaxation step, so a
+     * per-frame wave would enqueue exactly as fast as the queue drains and any other verb
+     * held at the same time would overflow it. At the default 0.9 m radius the spacing is
+     * 36 cm, so a 9 m/s wave stamps 25 times a second — comfortably under.
+     *
+     * Clamped like the projectile step and for the same reason: a hitch has to slow the
+     * wave, not teleport it across the world laying a stamp every 36 cm of the jump.
+     */
+    private _advanceRidges(dt: number): void {
+        if (this._live === 0) return;
+        const step = Math.min(dt, 1 / 30);
+        const speed = this._settings.v["play.ridgeSpeed"] as number;
+        const range = this._settings.v["play.ridgeRange"] as number;
+        const radius = this._settings.v["play.ridgeRadius"] as number;
+        const spacing = Math.max(radius * RIDGE_SPACING, 1e-3);
+        // NEGATIVE RAISES. srStamped's bowl swaps its pit and rim when the sign flips, so
+        // the crest is the kernel's positive lobe and the flanks are where the material came
+        // from — scaled by (1 - cohesion), which is why snow packs instead of trenching.
+        const depth = -(this._settings.v["play.ridgeHeight"] as number) * RIDGE_STAMP_DEPTH;
+
+        let i = 0;
+        while (i < this._live) {
+            const o = i * 6;
+            this._ridges[o + 4] += speed * step;
+            const reached = Math.min(this._ridges[o + 4], range);
+            // STRICTLY LESS THAN, and it matters. Both counters advance by adding to a
+            // running total, so they can land on bit-identical floats — and `<=` then lays
+            // two stamps in one call at the same instant, which makes the spacing depend on
+            // a floating-point coincidence rather than on the number above it.
+            while (this._ridges[o + 5] < reached) {
+                const d = this._ridges[o + 5];
+                this._ground.stamp(this._ridges[o] + this._ridges[o + 2] * d, this._ridges[o + 1] + this._ridges[o + 3] * d, radius, depth);
+                this._ridges[o + 5] += spacing;
+                this.ridgeLength += spacing;
+            }
+            if (this._ridges[o + 4] < range) {
+                i++;
+                continue;
+            }
+            // Arrived at the end of its range. Swap the last entry into this slot; the index
+            // deliberately does not advance, so the entry just moved here is stepped too.
+            this._live--;
+            const last = this._live * 6;
+            for (let k = 0; k < 6; k++) this._ridges[o + k] = this._ridges[last + k];
         }
     }
 

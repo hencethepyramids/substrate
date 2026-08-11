@@ -1004,6 +1004,7 @@ negative depth it raises instead of pressing.
 | `C` | raise the ground you are aiming at |
 | `V` | lower it |
 | `G` | pedestal — raise the ground under your own feet and ride it up |
+| `B` | ridge — press once and a wave runs `play.ridgeRange` metres away from you, laying a crest as it goes |
 
 `Z` and `X` are Phase 12 and are a step beyond the three below them: raise, lower and
 pedestal act on one *spot*, and these two have a *bearing*. See
@@ -1118,6 +1119,72 @@ does track it in the mass channel — but the decision is made in `verbs.ts`, on
 nothing there can see the buffer. That is a GPU-side choice and a later pass, and it is the
 most interesting thing left in this phase.
 
+### Pass C: a wave that outlives the press
+
+`B` sends a ridge running away from the character. It is the first verb here whose result
+outlives its input — the other five command ground for exactly as long as they are held —
+and it is also the pass with **nothing new in the substrate at all**. A ridge is a line of
+the same volume-neutral bowls `raise` has stamped since Phase 10. The roadmap called this
+the cheap one, and it is cheap precisely because "a shape" here means "the same operation,
+walked".
+
+**The stamps are spaced in metres, not in frames.** One per frame would make the ridge's
+shape a property of the machine it ran on — a smooth bank at 120 fps, a row of separate
+lumps at 20 — so the wave asks how far it has travelled since its last stamp and lays as
+many as fit. It also keeps the substrate queue honest: one stamp lands per relaxation step,
+so a per-frame wave would enqueue exactly as fast as the queue drains and any other verb
+held alongside it would overflow. At the default radius the spacing is 36 cm, so a 9 m/s
+wave stamps 25 times a second, and the probe reports zero dropped.
+
+**The crest is solved, not dialled.** `play.ridgeHeight` is metres of crest because a line
+of overlapping bowls builds up to the kernel's *line integral* over the spacing:
+integrating `(1 - u²)e^(-u²)` along the line gives `r√π·e^(-a²)·(½ - a²)`, so the crest
+stands at `depth · r√π / 2·spacing`. Pinning the spacing to a fixed fraction of the radius
+makes the radius cancel, and the per-stamp depth becomes a pure number.
+
+That one expression also predicts the flanks, which is the part `verbs.ts` never evaluates:
+the profile crosses zero at `a = 1/√2` and bottoms out at `a = √(3/2)`, so a ridge should
+sit between two troughs 1.22 radii out, 44.6% as deep as it is tall. **In ground that lets
+material come from beside it.** `srStamped` scales the bowl's rim by `(1 - cohesion)` —
+snow is 0.82 and packs instead, desert is 0.02 and trenches. Same call, same numbers,
+opposite picture, and no line of code in the game layer knows the difference:
+
+| | desert (cohesion 0.02) | snow (cohesion 0.82) |
+| --- | --- | --- |
+| crest standing | 0.5691 m | 0.6692 m |
+| model says | 0.5528 m | 0.6663 m |
+| deepest flank | **46.6%** of crest, at 1.40 radii | **7.4%** of crest, at 1.10 radii |
+| kernel predicts | 44.6% at 1.22 radii | suppressed to 18% of that |
+
+[phase12-ridge-desert.png](shots/phase12-ridge-desert.png) and
+[phase12-ridge-snow.png](shots/phase12-ridge-snow.png) are that table as a picture, at
+identical camera and sun: sand throws up a crest with a broad shadowed trough alongside it,
+snow throws up a sharp-edged wall with the ground either side untouched.
+
+Snow's crest stands **21% proud of the number asked for**, and should: `RIDGE_STAMP_DEPTH`
+divides by the whole line integral, which is only what the ground gives back when nothing
+is cohesive. Compensating for that in `verbs.ts` would mean writing element behaviour into
+the game layer, which is the one thing this project's architecture is arranged to prevent —
+so the setting is documented as metres of crest in cohesionless ground and the probe
+predicts the excess from cohesion rather than tuning it away.
+
+Two controls run before the ridge in every element, because a per-step bias and a
+once-per-stamp bias look identical in a finished crest: **a single raise of 0.4 m lifts the
+ground 0.3997 m** (0.08% out), and the buffer drifts **exactly zero** over thirty further
+steps. So the arithmetic is right before any line of stamps is involved, and nothing else
+is writing while the wave runs.
+
+One bug found in the writing, and it is the sort that only bites on a coincidence: the stamp
+loop tested `stamped <= reached`, and both counters advance by adding to a running total, so
+they can land on bit-identical floats and lay two stamps in one call. The spacing was
+depending on a floating-point accident. It is `<` now.
+
+**Known, and recorded rather than tuned away.** Desert's crest sits 2.9% above what the
+model predicts, snow's 0.4%. It is not the continuum approximation — summing the kernel
+directly over the stamps' actual positions agrees with the closed form to 0.05% — and it
+scales with `(1 - cohesion)`, which makes it a rim effect. Small, bounded, measured on every
+run, and not yet explained.
+
 ### What the remaining phases are for
 
 Phases 0 to 9 built a world; 10 and 11 gave someone a way to act in it and a reason to. What
@@ -1132,9 +1199,11 @@ cheap — a moving stamp over time. The rest need something the substrate does n
 is DIRECTIONAL TRANSPORT: every operation so far is radially symmetric about a point, and
 moving material sideways is a genuinely new primitive rather than a new call.
 
-Passes A and B are done and are written up [below](#phase-12--the-bending-vocabulary). The
-primitive exists and two verbs use it; the ridge, the wall and the loose-material question
-are what is left.
+Passes A, B and C are done and are written up
+[below](#phase-12--the-bending-vocabulary): the primitive, the two verbs that carry material
+along a bearing, and the ridge. Of the four moves named above, only **a wall thrown up along
+a line** is left — plus the loose-material question, which is the more interesting of the
+two.
 
 **Phase 13 — the bender's body.** Right now the earth moves and the character stands there.
 The gait solver from Phase 7 poses for walking, sprinting and sliding; it has nothing to say

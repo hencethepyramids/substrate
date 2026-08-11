@@ -382,6 +382,26 @@ for (const [flag, key, name] of [
     );
 }
 
+// SEND A RIDGE. One press, and the wave travels on its own for as long as its range lasts —
+// so unlike every other bending verb this needs a WAIT rather than a hold. `--ridge` presses
+// B and gives the wave time to arrive; `--ridge=<ms>` shortens that to catch it still
+// running, which is the only way to photograph a crest that has not finished being laid.
+if (argv.has("ridge")) {
+    await page.keyboard.press("b");
+    await page.waitForTimeout(Number(argv.get("ridge")) || 2200);
+    const v = await page.evaluate(() => ({
+        n: window.__substrate.verbs.ridges,
+        live: window.__substrate.verbs.liveRidges,
+        laid: window.__substrate.verbs.ridgeLength,
+        range: window.__substrate.settings.get("play.ridgeRange"),
+        dropped: window.__substrate.substrate.dropped,
+    }));
+    console.log(
+        `verbs: ${v.n} ridge(s) launched, ${v.live} still running, ${v.laid.toFixed(2)} m of crest laid ` +
+            `over a ${v.range} m range, stamps dropped ${v.dropped}`,
+    );
+}
+
 // GATHER, THROW, LAND. Two claims, and neither has a tuning constant in it: the volume
 // that left the hands has to be the volume that reaches the ground, and the heap has to
 // come down on the bearing it was thrown along. A projectile that loses its load, or one

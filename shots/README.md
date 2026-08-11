@@ -107,3 +107,13 @@ Every animation defect this project has had was invisible in a single still.
   would dig the same hollow and heap nothing, and on this terrain a single frame of it would
   still look plausible — the control is what says the bank is not a dune that was always
   there.
+
+- `phase12-ridge-desert.png` / `phase12-ridge-snow.png` — sun 18, yaw 335, pitch 20, the
+  same `--ridge` press in two elements at identical camera and sun. Sand throws up a crest
+  with a broad shadowed trough alongside it; snow throws up a sharp-edged wall with the
+  ground either side untouched.
+
+  That difference is one number. `srStamped` scales the bowl's rim by `(1 - cohesion)`, so
+  the material a ridge stands on comes from beside it in sand (cohesion 0.02) and from
+  compaction in snow (0.82). `scripts/probeRidge.mjs` measures the flanks at 46.6% of the
+  crest in desert against 7.4% in snow; this pair is that measurement with the lights on.
