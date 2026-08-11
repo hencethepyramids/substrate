@@ -43,9 +43,16 @@ uniform srStep: vec4f;
 /// xy: world centre, z: radius in metres, w: depth in metres. Zero depth is no stamp.
 uniform srStamp: vec4f;
 
+/// HALF the displacement a shove carries material along, in world metres. Only kind 3
+/// reads it: the source lobe sits at srStamp.xy - this and the sink at srStamp.xy + this,
+/// so the stamp centre is the midpoint of the journey rather than either end of it.
+uniform srStampVec: vec2f;
+
 /// Which kernel the queued stamp uses. 1 = the volume-neutral bowl above, 0 = the pure
 /// Gaussian below, which moves material into or out of the world instead of around it,
-/// and 2 = the same Gaussian writing compaction only, which moves nothing at all.
+/// 2 = the same Gaussian writing compaction only, which moves nothing at all, and 3 = two
+/// of those Gaussians back to back, which is the only operation here that moves material
+/// SIDEWAYS.
 uniform srStampKind: f32;
 
 /// Most of its loose mass a texel may hand to any ONE neighbour in a step. The eight
@@ -162,10 +169,37 @@ fn srStampKernel(worldXZ: vec2f) -> f32 {
 /// metres and solve for the amplitude, rather than exposing an amplitude and hoping the
 /// bookkeeping downstream matches. Conservation then holds by construction instead of by
 /// measurement: what a scoop removes is the number the caller asked to be given.
-fn srScoopKernel(worldXZ: vec2f) -> f32 {
-    let d = worldXZ - uniforms.srStamp.xy;
+fn srGaussian(worldXZ: vec2f, centre: vec2f) -> f32 {
+    let d = worldXZ - centre;
     let u2 = dot(d, d) / max(uniforms.srStamp.z * uniforms.srStamp.z, 1e-6);
     return exp(-u2);
+}
+
+fn srScoopKernel(worldXZ: vec2f) -> f32 {
+    return srGaussian(worldXZ, uniforms.srStamp.xy);
+}
+
+/// DIRECTIONAL TRANSPORT — a scoop and its own deposit, rigidly offset.
+///
+/// Every other kernel in this file is radially symmetric about a point, so every other
+/// operation the substrate has can raise material, lower it, or hand it to whoever is
+/// holding it, and NONE of them can move it sideways. That is the gap Phase 12 opens on:
+/// a drift swept aside and a ridge pushed away from you are not deeper or shallower
+/// versions of a stamp, they are a direction the kernel cannot express.
+///
+/// The fix is a dipole rather than a new machine. Lift at one lobe, drop at the other,
+/// and the two are the SAME Gaussian evaluated about two centres — so the volume removed
+/// and the volume delivered are equal by construction rather than by tuning, exactly as
+/// the bowl's neutrality comes from its integral vanishing. An odd function about the
+/// bisector integrates to zero over the plane, and this is one.
+///
+/// The lobes overlap and CANCEL when the displacement is short next to the radius, which
+/// is not a defect but it is a cost: the material that actually crosses the bisector is
+/// erf(|v| / radius) of a full Gaussian, not all of it. substrate.ts solves for the
+/// amplitude through that same erf, which is what keeps "move half a cubic metre" honest
+/// at every displacement rather than only at long ones.
+fn srShoveKernel(worldXZ: vec2f) -> f32 {
+    return srGaussian(worldXZ, uniforms.srStamp.xy - uniforms.srStampVec) - srGaussian(worldXZ, uniforms.srStamp.xy + uniforms.srStampVec);
 }
 
 fn srStamped(state: vec4f, worldXZ: vec2f) -> vec4f {
@@ -187,14 +221,26 @@ fn srStamped(state: vec4f, worldXZ: vec2f) -> vec4f {
     // Clamped here rather than only at the end of the step: srStamped() is applied to all
     // nine taps before the Laplacian is taken, so an unclamped spike would bleed outward
     // through diffusion before the write-out clamp ever saw it.
-    if (uniforms.srStampKind > 1.5) {
+    // A BAND RATHER THAN A THRESHOLD, and it has to be: this read `> 1.5` while 2 was the
+    // highest kind there was, so adding the shove as kind 3 silently routed every shove
+    // into the compaction branch — which writes no depression at all, and would have looked
+    // exactly like a shove that did nothing.
+    if (uniforms.srStampKind > 1.5 && uniforms.srStampKind < 2.5) {
         var t = state;
         t.z = min(t.z + srScoopKernel(worldXZ) * amount, 1.0);
         return t;
     }
 
-    if (uniforms.srStampKind < 0.5) {
-        let g = srScoopKernel(worldXZ) * amount;
+    // KIND 3 IS KIND 0 TWICE, BACK TO BACK, so it runs the same four lines rather than a
+    // parallel copy of them. A shove lifts material at its source lobe exactly as a gather
+    // does — a hollow, no rim, the material is elsewhere now — and lays it down at its sink
+    // lobe exactly as a place does: signed into depression so the surface knows it is
+    // higher, and into mass so it is LOOSE and free to slump on the next step. The only
+    // difference between carrying a shovelful and sweeping a drift is where the material
+    // went, and that lives in the kernel, not here.
+    if (uniforms.srStampKind < 0.5 || uniforms.srStampKind > 2.5) {
+        let k = select(srScoopKernel(worldXZ), srShoveKernel(worldXZ), uniforms.srStampKind > 2.5);
+        let g = k * amount;
         var t = state;
         // SIGNED INTO DEPRESSION, which is the same convention the bowl above uses for its
         // pit and its rim: positive is a hollow, negative stands proud. The first version

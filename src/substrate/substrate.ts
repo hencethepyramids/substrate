@@ -58,6 +58,31 @@ export const SUBSTRATE_SAMPLERS = ["sbSubTex"] as const;
 const FADE_TEXELS = 8;
 
 /**
+ * Shortest shove worth doing, as a fraction of the radius.
+ *
+ * A shove's two lobes cancel where they overlap, so the material that actually crosses
+ * from source to sink is erf(|v| / radius) of a Gaussian rather than all of it — and the
+ * amplitude needed to deliver a given volume goes as 1/erf, which runs away as the
+ * displacement shrinks. At a twentieth of a radius erf is 0.028, so delivering the asked
+ * volume would need a 36x spike that SR_MAX_OFFSET clamps, and the clamp would break the
+ * volume claim silently. A shove that short is not a shove, so it is refused instead.
+ */
+const SHOVE_MIN_FRACTION = 0.05;
+
+/**
+ * Abramowitz & Stegun 7.1.26, max absolute error 1.5e-7 — far below anything that
+ * matters against a buffer quantised to centimetres.
+ *
+ * Here because the shove's amplitude solve needs it and JavaScript has no erf. Only ever
+ * called with x >= 0: the argument is a distance over a radius.
+ */
+function erf(x: number): number {
+    const t = 1 / (1 + 0.3275911 * x);
+    const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+    return 1 - poly * Math.exp(-x * x);
+}
+
+/**
  * Longest step the relaxation is asked to take. The slump limiter is stable well past
  * this, but a 200 ms hitch should not also produce 200 ms of collapse in one frame —
  * the simulation slows down rather than jumping.
@@ -132,8 +157,14 @@ export class Substrate {
     private readonly _step = new Vector4(0, 0, 1, 0);
     private readonly _stamp = new Vector4(0, 0, 1, 0);
     private readonly _probeCentre = new Vector2(0, 0);
-    /** Ring of (x, z, radius, depth). Preallocated — rule 1 reaches in here every frame. */
-    private readonly _queue = new Float32Array(QUEUE_LENGTH * 5);
+    /** Half the displacement of the queued shove, world metres. Zero for every other kind. */
+    private readonly _stampVec = new Vector2(0, 0);
+    /**
+     * Ring of (x, z, radius, amount, kind, vx, vz). Preallocated — rule 1 reaches in here
+     * every frame. The last two are the shove's half-displacement and stay zero for the
+     * kinds that are radially symmetric, which is all of the others.
+     */
+    private readonly _queue = new Float32Array(QUEUE_LENGTH * 7);
     /** Which kernel the dequeued stamp uses. See srStampKind in the relax shader. */
     private _stampKind = 1;
     private _qHead = 0;
@@ -316,18 +347,59 @@ export class Substrate {
         this._enqueue(x, z, Math.max(radius, 1e-3), amount, 2);
     }
 
-    private _enqueue(x: number, z: number, radius: number, amount: number, kind: number): void {
+    /**
+     * Move material SIDEWAYS: take `volume` cubic metres from (x, z) and put it down at
+     * (x + dx, z + dz).
+     *
+     * THE OPERATION THE SUBSTRATE DID NOT HAVE. Everything above is radially symmetric
+     * about a point — stamp displaces outward into a rim, scoop lifts straight up, pack
+     * moves nothing — so between them they can raise ground, lower it, or hand it to
+     * whoever is holding it, and none of them can carry it in a DIRECTION. A drift swept
+     * aside and a ridge driven away from you are not deeper stamps, they are a bearing the
+     * kernel could not express, which is why Phase 12 opens with a primitive rather than a
+     * verb.
+     *
+     * Volume-neutral like stamp(), but for a different reason worth keeping straight. The
+     * bowl conserves because its radial integral vanishes; this conserves because it is one
+     * Gaussian minus the same Gaussian somewhere else, which is odd about the bisector of
+     * the two and therefore integrates to zero over the plane exactly. Nothing is created
+     * and nothing is destroyed even in principle.
+     *
+     * THE AMPLITUDE SOLVE IS NOT scoop's, and assuming it was would have been a quiet 19%
+     * error at the geometry a verb will actually use. Where the lobes overlap they cancel,
+     * so the material that crosses the bisector is erf(|v| / radius) of a full Gaussian
+     * rather than all of it — at a displacement of twice the radius that is 0.843, so a
+     * naive pi*r^2 solve delivers six parts in seven of what was asked and the books look
+     * fine because the shove is still perfectly neutral. Dividing it back out here is what
+     * makes "move half a cubic metre" mean half a cubic metre at every displacement, and
+     * keeps conservation a property of the interface exactly as scoop's is.
+     */
+    shove(x: number, z: number, radius: number, dx: number, dz: number, volume: number): void {
+        if (volume === 0) return;
+        const r = Math.max(radius, 1e-3);
+        const len = Math.hypot(dx, dz);
+        if (len < r * SHOVE_MIN_FRACTION) return;
+        // The kernel is centred on the MIDPOINT of the journey and reaches half the
+        // displacement each way, so what the caller gave as "from here to there" arrives as
+        // "about here, this far either side" — one conversion, in one place.
+        const crossing = erf(len / (2 * r));
+        this._enqueue(x + dx * 0.5, z + dz * 0.5, r, volume / (Math.PI * r * r * crossing), 3, dx * 0.5, dz * 0.5);
+    }
+
+    private _enqueue(x: number, z: number, radius: number, amount: number, kind: number, vx = 0, vz = 0): void {
         if (amount === 0) return;
         if (this._pending >= QUEUE_LENGTH) {
             this.dropped++;
             return;
         }
-        const i = ((this._qHead + this._pending) % QUEUE_LENGTH) * 5;
+        const i = ((this._qHead + this._pending) % QUEUE_LENGTH) * 7;
         this._queue[i] = x;
         this._queue[i + 1] = z;
         this._queue[i + 2] = radius;
         this._queue[i + 3] = amount;
         this._queue[i + 4] = kind;
+        this._queue[i + 5] = vx;
+        this._queue[i + 6] = vz;
         this._pending++;
     }
 
@@ -345,9 +417,10 @@ export class Substrate {
             this._stamp.w = 0;
             return;
         }
-        const i = this._qHead * 5;
+        const i = this._qHead * 7;
         this._stamp.set(this._queue[i], this._queue[i + 1], this._queue[i + 2], this._queue[i + 3]);
         this._stampKind = this._queue[i + 4];
+        this._stampVec.set(this._queue[i + 5], this._queue[i + 6]);
         this._qHead = (this._qHead + 1) % QUEUE_LENGTH;
         this._pending--;
     }
@@ -484,6 +557,7 @@ export class Substrate {
         target.setVector2("srShift", this._shift);
         target.setVector4("srStep", this._step);
         target.setVector4("srStamp", this._stamp);
+        target.setVector2("srStampVec", this._stampVec);
         target.setFloat("srStampKind", this._stampKind);
     }
 
@@ -492,6 +566,7 @@ export class Substrate {
         if (!this._targets[0].isReady() || !this._targets[1].isReady()) return;
         this._step.set(0, 1, 0, 0);
         this._stamp.set(0, 0, 1, 0);
+        this._stampVec.set(0, 0);
         this._shift.set(0, 0);
         this._qHead = 0;
         this._pending = 0;
